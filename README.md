@@ -1,42 +1,20 @@
-# Xmip repository template — Rust
+# xmip-core-tls
 
-This repository is the starter snapshot for a Rust Xmip module repository. It is
-not an Xmip runtime capability.
+TLS for every transport that needs it: a connection this node opens, one it
+answers, and one upgraded in place where a protocol negotiates first
+(STARTTLS, STLS, FTPS). The certificate and the trust store are here; when to
+upgrade and what to send before the handshake stay with the protocol.
 
-For a .NET 11 surface — the CLI, the PowerShell module, the MAUI desktop GUI or
-the Blazor web GUI — use
-[xmip-template-dotnet](https://github.com/IlleNilsson/xmip-template-dotnet)
-instead. ADR-0014: every user-interfacing module is .NET 11, and
-`xmip-core-abi` is the exception.
+**Hybrid first.** The key exchange offers X25519MLKEM768 — X25519 and
+ML-KEM-768 together — ahead of X25519, P-256 and P-384, so a session is as
+safe as the stronger of the two and a recording kept for a quantum computer
+is no easier to read later than it is today. A peer that knows only classical
+groups is served with X25519, and the handshake says which was agreed.
+ADR-0033, amended 2026-09-22.
 
-A repository generated from this template has independent history. Later
-template changes do not automatically rewrite generated repositories.
+Until 2026-09-23 TLS sat inside `xmip-core-transport-http`, so the transports
+riding on HTTP could reach it and the twenty that do not — SMTP and IMAP with
+STARTTLS, MQTT, AMQP, Kafka, the databases, syslog — could not; four mapped
+their `https` URLs to a stack they had no way to load.
 
-## Before implementation
-
-Follow [TEMPLATE_SETUP.md](TEMPLATE_SETUP.md), and item 3 first. The new
-repository must be classified and declared in the authoritative Xmip
-architecture manifest before its responsibility or dependencies are treated as
-accepted architecture.
-
-## Toolchain
-
-`rust-toolchain.toml` pins the toolchain for the whole estate. rustup reads it
-automatically and installs what is missing. Do not change it here — raising it
-is one deliberate change across every repository.
-
-## Shared governance
-
-Repository-specific licensing remains explicit in [LICENSE](LICENSE).
-Contribution, security, support, issue and pull-request defaults are inherited
-from [IlleNilsson/.github](https://github.com/IlleNilsson/.github) when they are
-not overridden locally.
-
-## Verification
-
-The included workflow is manual-only and calls the versioned shared workflow at
-`IlleNilsson/.github@v1`. It does not run on pushes, pull requests or a
-schedule.
-
-The ordered stages are formatting, semantic analysis, linting, compilation and
-linking, and test execution. Packaging and publishing are not configured.
+`architecture.toml` carries the maturity.

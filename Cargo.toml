@@ -1,25 +1,31 @@
 # Its own workspace root, so this repository builds on its own.
-#
-# Every module repository carries this and the template did not, which stopped
-# mattering the moment the template stopped sitting beside the estate: nested at
-# template/rust, cargo walked up, found the root workspace and refused to build.
-#
-# It would have bitten a generated repository the same way. A template that does
-# not obey the estate's rules produces repositories that start out breaking
-# them — doc/governance/rust-style.md section 4.
 [workspace]
 
 [package]
-name = "xmip-template-rust"
+name = "xmip-core-tls"
 version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-or-later"
-repository = "https://github.com/IlleNilsson/xmip-template-rust"
-description = "Starter template for a Rust Xmip module repository."
-publish = false
+repository = "https://github.com/IlleNilsson/xmip-core-tls"
+description = "TLS for Xmip: a guarded connection, hybrid key exchange, the node's certificate."
 
 [lib]
 path = "src/lib.rs"
+
+[dependencies]
+# rustls with its default provider, aws-lc-rs, because ring has no ML-KEM and
+# the hybrid key exchange is the point (ADR-0033, amendment 2026-09-22). Its
+# assembler comes prebuilt, so a Windows build needs no NASM.
+rustls = "0.23"
+# The operating system's trust store rather than a bundled root list: the
+# organizations Xmip is aimed at run their own certificate authorities.
+rustls-native-certs = "0.8"
+# Reading a certificate chain and a private key as PEM.
+rustls-pemfile = "2"
+
+[dev-dependencies]
+# A self-signed certificate for the handshake tests. Test-only.
+rcgen = "0.13"
 
 [lints.rust]
 # forbid, not deny: a module has no business writing unsafe. The one exception

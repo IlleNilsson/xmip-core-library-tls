@@ -1,4 +1,4 @@
-# xmip-core-tls
+# xmip-core-library-tls
 
 TLS for every transport that needs it: a connection this node opens, one it
 answers, and one upgraded in place where a protocol negotiates first

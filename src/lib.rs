@@ -20,14 +20,20 @@
 //! to a stack they had no way to load. It is a Foundation repository of its
 //! own, on the owner's decision of 2026-09-22.
 //!
+//! **The protocol inside, agreed in the handshake.** A client offers the
+//! application protocols it speaks and the server selects one ([`alpn`],
+//! RFC 7301); HTTP agrees HTTP/2 or HTTP/1.1 this way. Which identifiers to
+//! offer is the protocol's.
+//!
 //! **What stays with the protocol.** When to upgrade, what to send before the
 //! handshake, which port is implicitly guarded: that is each protocol's, and
 //! nothing here knows it.
 
+pub mod alpn;
 mod client;
 mod server;
 
-pub use client::{Guarded, client, client_with};
+pub use client::{Guarded, client, client_offering, client_with, configure};
 pub use server::{GuardedServer, server, server_config};
 
 use std::sync::Arc;

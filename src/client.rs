@@ -23,6 +23,17 @@ pub fn client(host: &str, tcp: TcpStream) -> Result<Guarded> {
     client_with(host, tcp, Arc::new(configure(native_roots()?)))
 }
 
+/// As [`client`], offering `protocols` by ALPN, in order of preference;
+/// [`crate::alpn::agreed`] reads which the server selected.
+///
+/// # Errors
+///
+/// As [`client`].
+pub fn client_offering(host: &str, tcp: TcpStream, protocols: &[&[u8]]) -> Result<Guarded> {
+    let config = crate::alpn::offering(configure(native_roots()?), protocols);
+    client_with(host, tcp, Arc::new(config))
+}
+
 /// As [`client`], against a trust store the caller holds — a partner's own
 /// certificate authority, or a test's.
 ///

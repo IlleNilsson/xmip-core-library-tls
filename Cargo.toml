@@ -7,7 +7,7 @@ version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-or-later"
 repository = "https://github.com/IlleNilsson/xmip-core-library-tls"
-description = "TLS for Xmip: a guarded connection, hybrid key exchange, the node's certificate."
+description = "TLS for Xmip: a guarded connection, hybrid key exchange, the protocol inside agreed by ALPN, the node's certificate."
 
 [lib]
 path = "src/lib.rs"

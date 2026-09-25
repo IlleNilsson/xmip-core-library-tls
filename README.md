@@ -12,6 +12,14 @@ is no easier to read later than it is today. A peer that knows only classical
 groups is served with X25519, and the handshake says which was agreed.
 ADR-0033, amended 2026-09-22.
 
+**The protocol inside, agreed in the handshake.** ALPN, RFC 7301 (`alpn`):
+`client_offering` offers the protocols a client speaks, in its order of
+preference; `alpn::selecting` lets a server pick the first of its own it
+was offered; `alpn::agreed` finishes the handshake on either side and says
+which was chosen, or none where a side offered nothing. HTTP agrees `h2` or
+`http/1.1` this way — the identifiers are HTTP's (`net::http::Version`),
+not this crate's.
+
 Until 2026-09-23 TLS sat inside `xmip-core-transport-http`, so the transports
 riding on HTTP could reach it and the twenty that do not — SMTP and IMAP with
 STARTTLS, MQTT, AMQP, Kafka, the databases, syslog — could not; four mapped

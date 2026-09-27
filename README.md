@@ -20,6 +20,16 @@ which was chosen, or none where a side offered nothing. HTTP agrees `h2` or
 `http/1.1` this way — the identifiers are HTTP's (`net::http::Version`),
 not this crate's.
 
+**Loaded once, resumed after.** The operating system's trust store is read
+the first time a connection needs it, and a client configuration is built
+once per list of protocols offered and shared by every connection after;
+the cryptographic provider is built once. The configuration keeps rustls's
+session cache, so a second connection to a server resumes the session the
+first agreed rather than repeating the full handshake — a test holds the
+second handshake to `Resumed`. Until 2026-09-27 every connection read the
+store and built its own configuration, and resumed nothing. A caller with
+its own trust store (`client_with`) keeps its configuration the same way.
+
 Until 2026-09-23 TLS sat inside `xmip-core-transport-http`, so the transports
 riding on HTTP could reach it and the twenty that do not — SMTP and IMAP with
 STARTTLS, MQTT, AMQP, Kafka, the databases, syslog — could not; four mapped

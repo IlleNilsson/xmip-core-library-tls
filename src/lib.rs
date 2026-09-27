@@ -50,13 +50,17 @@ const KEY_EXCHANGE: [&dyn rustls::crypto::SupportedKxGroup; 4] = [
 /// The one cryptographic provider both sides build from, so a client and a
 /// server of this node offer the same groups in the same order. Listed
 /// explicitly rather than taken from the provider's default, so a change of
-/// rustls's preference cannot quietly change Xmip's.
+/// rustls's preference cannot quietly change Xmip's. Built once per process.
 #[must_use]
 pub fn provider() -> Arc<rustls::crypto::CryptoProvider> {
-    Arc::new(rustls::crypto::CryptoProvider {
-        kx_groups: KEY_EXCHANGE.to_vec(),
-        ..rustls::crypto::aws_lc_rs::default_provider()
-    })
+    static PROVIDER: std::sync::OnceLock<Arc<rustls::crypto::CryptoProvider>> =
+        std::sync::OnceLock::new();
+    Arc::clone(PROVIDER.get_or_init(|| {
+        Arc::new(rustls::crypto::CryptoProvider {
+            kx_groups: KEY_EXCHANGE.to_vec(),
+            ..rustls::crypto::aws_lc_rs::default_provider()
+        })
+    }))
 }
 
 /// Why a connection could not be guarded.

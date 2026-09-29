@@ -46,7 +46,7 @@ pub fn client_offering(host: &str, tcp: TcpStream, protocols: &[&[u8]]) -> Resul
     client_with(host, tcp, native(protocols)?)
 }
 
-/// As [`client`], against a trust store the caller holds — a partner's own
+/// As [`client`], against a trust store the caller holds — a Party's own
 /// certificate authority, or a test's. The caller keeps `config` for the
 /// next connection, as [`client`] keeps its own, so sessions resume.
 ///

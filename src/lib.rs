@@ -25,15 +25,26 @@
 //! RFC 7301); HTTP agrees HTTP/2 or HTTP/1.1 this way. Which identifiers to
 //! offer is the protocol's.
 //!
+//! **Mutual TLS between Xmip's own parts.** [`Identity`] is what one end
+//! presents and what it trusts; its server refuses a client without a
+//! certificate reaching the anchors, and its client presents one (ADR-0063
+//! clause 1). Xmip Storage is reached this way (ADR-0063, amendment
+//! 2026-10-01).
+//!
 //! **What stays with the protocol.** When to upgrade, what to send before the
 //! handshake, which port is implicitly guarded: that is each protocol's, and
 //! nothing here knows it.
 
 pub mod alpn;
 mod client;
+mod mutual;
 mod server;
 
 pub use client::{Guarded, client, client_offering, client_with, configure};
+pub use mutual::Identity;
+/// The two configurations a connection is guarded by, named here so a
+/// caller that keeps one names this library's and no TLS stack of its own.
+pub use rustls::{ClientConfig, ServerConfig};
 pub use server::{GuardedServer, server, server_config};
 
 use std::sync::Arc;

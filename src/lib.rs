@@ -31,12 +31,18 @@
 //! clause 1). Xmip Storage is reached this way (ADR-0063, amendment
 //! 2026-10-01).
 //!
+//! **Read on one thread, written on another.** [`duplex::split`] gives a
+//! connection's two directions to two threads, so a protocol that streams
+//! to its peer and listens to it at once — the Event link between nodes —
+//! never waits to write behind its own waiting read.
+//!
 //! **What stays with the protocol.** When to upgrade, what to send before the
 //! handshake, which port is implicitly guarded: that is each protocol's, and
 //! nothing here knows it.
 
 pub mod alpn;
 mod client;
+pub mod duplex;
 mod mutual;
 mod server;
 

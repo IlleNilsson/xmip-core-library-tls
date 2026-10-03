@@ -20,6 +20,15 @@ which was chosen, or none where a side offered nothing. HTTP agrees `h2` or
 `http/1.1` this way — the identifiers are HTTP's (`net::http::Version`),
 not this crate's.
 
+**Read on one thread, written on another** (`duplex`). `duplex::split`
+finishes a connection's handshake and gives its two directions to two
+threads: the `Reading` side waits on the socket holding nothing and takes
+the session only to decrypt what came, the `Writing` side takes it to
+encrypt and send, so a protocol that streams to its peer and listens to it
+at once never waits to write behind its own waiting read. A read timeout on
+the socket loses nothing of a record. The Event link between nodes
+(`xmip-core-event`) runs on it.
+
 **Loaded once, resumed after.** The operating system's trust store is read
 the first time a connection needs it, and a client configuration is built
 once per list of protocols offered and shared by every connection after;

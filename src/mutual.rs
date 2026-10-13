@@ -34,16 +34,10 @@ impl Identity {
         let key = rustls_pemfile::private_key(&mut &key_pem[..])
             .map_err(|failure| TlsError::new(format!("reading the private key: {failure}")))?
             .ok_or_else(|| TlsError::new("the key PEM held no private key"))?;
-        let mut anchors = rustls::RootCertStore::empty();
-        for anchor in certificates_of(anchors_pem, "the trust anchors")? {
-            anchors
-                .add(anchor)
-                .map_err(|failure| TlsError::new(format!("a trust anchor: {failure}")))?;
-        }
         Ok(Self {
             certificates,
             key: Arc::new(key),
-            anchors: Arc::new(anchors),
+            anchors: Arc::new(anchors(anchors_pem)?),
         })
     }
 
@@ -95,6 +89,32 @@ fn certificates(pem: &[u8], what: &str) -> Result<Vec<rustls::pki_types::Certifi
         return Err(TlsError::new(format!("{what} held no certificate")));
     }
     Ok(found)
+}
+
+/// A client that trusts only the certificates `anchors_pem` holds — a
+/// cluster's own authority, an ACME server it runs — never the operating
+/// system's trust store; it presents no certificate of its own.
+///
+/// # Errors
+///
+/// Where the PEM holds no certificate, or one a trust store does not take.
+pub fn trusting(anchors_pem: &[u8]) -> Result<rustls::ClientConfig> {
+    let roots = anchors(anchors_pem)?;
+    if roots.is_empty() {
+        return Err(TlsError::new("the trust anchors held no certificate"));
+    }
+    Ok(configure(roots))
+}
+
+/// The trust store the certificates `pem` holds make.
+fn anchors(pem: &[u8]) -> Result<rustls::RootCertStore> {
+    let mut anchors = rustls::RootCertStore::empty();
+    for anchor in certificates_of(pem, "the trust anchors")? {
+        anchors
+            .add(anchor)
+            .map_err(|failure| TlsError::new(format!("a trust anchor: {failure}")))?;
+    }
+    Ok(anchors)
 }
 
 fn certificates_of(
@@ -227,5 +247,13 @@ mod tests {
                 .message
                 .contains("no private key")
         );
+    }
+
+    #[test]
+    fn a_client_trusts_only_the_anchors_it_is_given_and_none_is_refused() {
+        let ours = authority();
+        assert!(trusting(ours.cert.pem().as_bytes()).is_ok());
+        let refused = trusting(b"").expect_err("refused");
+        assert!(refused.message.contains("no certificate"), "{refused}");
     }
 }

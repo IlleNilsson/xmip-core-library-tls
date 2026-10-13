@@ -47,7 +47,7 @@ mod mutual;
 mod server;
 
 pub use client::{Guarded, client, client_offering, client_with, configure};
-pub use mutual::Identity;
+pub use mutual::{Identity, trusting};
 /// The two configurations a connection is guarded by, named here so a
 /// caller that keeps one names this library's and no TLS stack of its own.
 pub use rustls::{ClientConfig, ServerConfig};

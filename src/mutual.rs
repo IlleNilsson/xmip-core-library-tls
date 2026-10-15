@@ -11,32 +11,61 @@
 
 use std::sync::Arc;
 
+use rustls::sign::{CertifiedKey, SingleCertAndKey};
+
+use crate::signer::{Kept, Sign};
 use crate::{Result, TlsError, configure, provider};
 
-/// What one end presents and what it trusts: its certificate chain and
-/// private key, and the anchors a peer's chain must reach, each PEM.
+/// What one end presents and what it trusts: its certificate chain and the
+/// key that signs for it — read from PEM, or kept by its platform's keeper
+/// and asked for each signature ([`Sign`]) — and the anchors a peer's chain
+/// must reach.
 #[derive(Clone)]
 pub struct Identity {
-    certificates: Vec<rustls::pki_types::CertificateDer<'static>>,
-    key: Arc<rustls::pki_types::PrivateKeyDer<'static>>,
+    presented: Arc<CertifiedKey>,
     anchors: Arc<rustls::RootCertStore>,
 }
 
 impl Identity {
-    /// The identity a chain, its key and the anchors make.
+    /// The identity a chain, its key and the anchors make, each PEM.
     ///
     /// # Errors
     ///
-    /// Where a PEM holds no certificate or no key, or an anchor is not a
-    /// certificate a trust store takes.
+    /// Where a PEM holds no certificate or no key, the certificate and key
+    /// do not pair, or an anchor is not a certificate a trust store takes.
     pub fn from_pem(certificate_pem: &[u8], key_pem: &[u8], anchors_pem: &[u8]) -> Result<Self> {
         let certificates = certificates(certificate_pem, "the certificate")?;
         let key = rustls_pemfile::private_key(&mut &key_pem[..])
             .map_err(|failure| TlsError::new(format!("reading the private key: {failure}")))?
             .ok_or_else(|| TlsError::new("the key PEM held no private key"))?;
+        let presented =
+            CertifiedKey::from_der(certificates, key, &provider()).map_err(|failure| {
+                TlsError::new(format!("loading the certificate and key: {failure}"))
+            })?;
         Ok(Self {
-            certificates,
-            key: Arc::new(key),
+            presented: Arc::new(presented),
+            anchors: Arc::new(anchors(anchors_pem)?),
+        })
+    }
+
+    /// The identity a chain, PEM, makes with a key this library cannot
+    /// read: `signer` signs every handshake, ECDSA on P-256 with SHA-256
+    /// (ADR-0034, amendment 2026-10-15). Whether the chain's leaf is the
+    /// keeper's key is the handshake's to find: a peer refuses a signature
+    /// its certificate does not verify.
+    ///
+    /// # Errors
+    ///
+    /// Where the chain holds no certificate, or an anchor is not a
+    /// certificate a trust store takes.
+    pub fn from_signer(
+        certificate_pem: &[u8],
+        signer: Arc<dyn Sign>,
+        anchors_pem: &[u8],
+    ) -> Result<Self> {
+        let certificates = certificates(certificate_pem, "the certificate")?;
+        Ok(Self {
+            presented: Arc::new(CertifiedKey::new(certificates, Arc::new(Kept(signer)))),
             anchors: Arc::new(anchors(anchors_pem)?),
         })
     }
@@ -46,7 +75,7 @@ impl Identity {
     ///
     /// # Errors
     ///
-    /// Where the anchors are empty or the certificate and key do not pair.
+    /// Where the anchors are empty.
     pub fn server(&self) -> Result<rustls::ServerConfig> {
         let verifier = rustls::server::WebPkiClientVerifier::builder_with_provider(
             Arc::clone(&self.anchors),
@@ -54,12 +83,13 @@ impl Identity {
         )
         .build()
         .map_err(|failure| TlsError::new(format!("the client verifier: {failure}")))?;
-        rustls::ServerConfig::builder_with_provider(provider())
+        Ok(rustls::ServerConfig::builder_with_provider(provider())
             .with_protocol_versions(rustls::DEFAULT_VERSIONS)
             .unwrap_or_else(|_| unreachable!("the default versions are always supported"))
             .with_client_cert_verifier(verifier)
-            .with_single_cert(self.certificates.clone(), self.key.clone_key())
-            .map_err(|failure| TlsError::new(format!("loading the certificate and key: {failure}")))
+            .with_cert_resolver(Arc::new(SingleCertAndKey::from(Arc::clone(
+                &self.presented,
+            )))))
     }
 
     /// The client side: checks the server against the anchors and presents
@@ -68,16 +98,15 @@ impl Identity {
     ///
     /// # Errors
     ///
-    /// Where the certificate and key do not pair.
+    /// None today; a `Result` beside [`Identity::server`]'s.
     pub fn client(&self) -> Result<rustls::ClientConfig> {
         let mut config = rustls::ClientConfig::builder_with_provider(provider())
             .with_protocol_versions(rustls::DEFAULT_VERSIONS)
             .unwrap_or_else(|_| unreachable!("the default versions are always supported"))
             .with_root_certificates(Arc::clone(&self.anchors))
-            .with_client_auth_cert(self.certificates.clone(), self.key.clone_key())
-            .map_err(|failure| {
-                TlsError::new(format!("loading the certificate and key: {failure}"))
-            })?;
+            .with_client_cert_resolver(Arc::new(SingleCertAndKey::from(Arc::clone(
+                &self.presented,
+            ))));
         config.resumption = configure(rustls::RootCertStore::empty()).resumption;
         Ok(config)
     }
@@ -225,6 +254,69 @@ mod tests {
         let mut roots = rustls::RootCertStore::empty();
         roots.add(ours.cert.der().clone()).expect("anchor");
         assert!(!ping(Arc::new(configure(roots)), &identity(&far)));
+    }
+
+    /// A keeper: signs with a key this library is never handed, or refuses.
+    struct Keeper(Option<Arc<dyn rustls::sign::SigningKey>>);
+
+    impl crate::Sign for Keeper {
+        fn sign(&self, message: &[u8]) -> Result<Vec<u8>> {
+            let key = self
+                .0
+                .as_ref()
+                .ok_or_else(|| TlsError::new("the user said no"))?;
+            let signer = key
+                .choose_scheme(&[rustls::SignatureScheme::ECDSA_NISTP256_SHA256])
+                .expect("P-256");
+            signer
+                .sign(message)
+                .map_err(|failure| TlsError::new(failure.to_string()))
+        }
+    }
+
+    fn kept(issued: &Issued, keeper: Keeper) -> Identity {
+        Identity::from_signer(
+            issued.certificate.as_bytes(),
+            Arc::new(keeper),
+            issued.authority.as_bytes(),
+        )
+        .expect("identity")
+    }
+
+    #[test]
+    fn a_key_its_keeper_holds_signs_the_handshake_and_a_keeper_that_refuses_is_refused() {
+        let ours = authority();
+        let near = issued(&ours, "localhost");
+        let far = issued(&ours, "localhost");
+        let der = rustls_pemfile::private_key(&mut near.key.as_bytes())
+            .expect("pem")
+            .expect("a key");
+        let key = rustls::crypto::aws_lc_rs::sign::any_ecdsa_type(&der).expect("ECDSA");
+
+        let client = kept(&near, Keeper(Some(Arc::clone(&key)))).client();
+        assert!(ping(Arc::new(client.expect("client")), &identity(&far)));
+        let refusing = kept(&near, Keeper(None)).client().expect("client");
+        assert!(!ping(Arc::new(refusing), &identity(&far)));
+
+        // The other way about: a server whose key is kept answers too.
+        let server = kept(&far, Keeper(Some(key)));
+        assert!(!ping(
+            Arc::new(identity(&near).client().expect("client")),
+            &server
+        ));
+        let held = issued(&ours, "localhost");
+        let der = rustls_pemfile::private_key(&mut held.key.as_bytes())
+            .expect("pem")
+            .expect("a key");
+        let own = rustls::crypto::aws_lc_rs::sign::any_ecdsa_type(&der).expect("ECDSA");
+        let server = kept(&held, Keeper(Some(own)));
+        assert!(ping(
+            Arc::new(identity(&near).client().expect("client")),
+            &server
+        ));
+
+        let refused = Identity::from_signer(b"", Arc::new(Keeper(None)), b"").err();
+        assert!(refused.expect("refused").message.contains("no certificate"));
     }
 
     #[test]

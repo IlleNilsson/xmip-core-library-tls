@@ -20,6 +20,13 @@ which was chosen, or none where a side offered nothing. HTTP agrees `h2` or
 `http/1.1` this way — the identifiers are HTTP's (`net::http::Version`),
 not this crate's.
 
+**A key it cannot read.** `Identity::from_pem` presents a chain with its PEM
+key; `Identity::from_signer` presents a chain whose key its platform's
+keeper holds — the Android Keystore, the Secure Enclave, Windows CNG and the
+TPM — every signature the handshake needs asked of a `Sign`: ECDSA on P-256
+with SHA-256, DER, the one scheme it offers. A phone's operator key never
+leaves its keeper (ADR-0034, amendment 2026-10-15).
+
 **Read on one thread, written on another** (`duplex`). `duplex::split`
 finishes a connection's handshake and gives its two directions to two
 threads: the `Reading` side waits on the socket holding nothing and takes

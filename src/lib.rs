@@ -29,7 +29,10 @@
 //! presents and what it trusts; its server refuses a client without a
 //! certificate reaching the anchors, and its client presents one (ADR-0063
 //! clause 1). Xmip Storage is reached this way (ADR-0063, amendment
-//! 2026-10-01).
+//! 2026-10-01). An end whose key never leaves its platform's keeper — a
+//! phone's operator key in the Android Keystore or the Secure Enclave —
+//! presents its chain with a [`Sign`] in place of the key, and the keeper
+//! signs each handshake (ADR-0034, amendment 2026-10-15).
 //!
 //! **Read on one thread, written on another.** [`duplex::split`] gives a
 //! connection's two directions to two threads, so a protocol that streams
@@ -45,6 +48,7 @@ mod client;
 pub mod duplex;
 mod mutual;
 mod server;
+mod signer;
 
 pub use client::{Guarded, client, client_offering, client_with, configure};
 pub use mutual::{Identity, trusting};
@@ -52,6 +56,7 @@ pub use mutual::{Identity, trusting};
 /// caller that keeps one names this library's and no TLS stack of its own.
 pub use rustls::{ClientConfig, ServerConfig};
 pub use server::{GuardedServer, server, server_config};
+pub use signer::Sign;
 
 use std::sync::Arc;
 

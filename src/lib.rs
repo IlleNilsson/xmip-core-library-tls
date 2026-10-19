@@ -34,6 +34,12 @@
 //! presents its chain with a [`Sign`] in place of the key, and the keeper
 //! signs each handshake (ADR-0034, amendment 2026-10-15).
 //!
+//! **Who the client is, before its content.** [`peer::answered`] finishes
+//! a server's handshake and reads the certificate its client presented —
+//! subject and issuer as [`Name`] writes them, and the fingerprint — which a
+//! transport that terminates TLS reports on its arrival for the identity
+//! gates (ADR-0033, amendment 2026-10-19).
+//!
 //! **Read on one thread, written on another.** [`duplex::split`] gives a
 //! connection's two directions to two threads, so a protocol that streams
 //! to its peer and listens to it at once — the Event link between nodes —
@@ -47,11 +53,15 @@ pub mod alpn;
 mod client;
 pub mod duplex;
 mod mutual;
+mod name;
+pub mod peer;
 mod server;
 mod signer;
 
 pub use client::{Guarded, client, client_offering, client_with, configure};
 pub use mutual::{Identity, trusting};
+pub use name::Name;
+pub use peer::Peer;
 /// The two configurations a connection is guarded by, named here so a
 /// caller that keeps one names this library's and no TLS stack of its own.
 pub use rustls::{ClientConfig, ServerConfig};

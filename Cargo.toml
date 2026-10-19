@@ -22,6 +22,16 @@ rustls = "0.23"
 rustls-native-certs = "0.8"
 # Reading a certificate chain and a private key as PEM.
 rustls-pemfile = "2"
+# A certificate's subject and issuer, which rustls keeps as DER (`name`):
+# what a server that terminates TLS reports of its client (`peer`), and
+# what the identity gates compare a claim with.
+x509-parser = "0.16"
+# The leaf's SHA-256 fingerprint (`peer`), from the provider rustls already
+# brings, its assembler prebuilt.
+aws-lc-rs = { version = "1", features = ["prebuilt-nasm"] }
+# Hexadecimal, as every reader in the estate writes it: a fingerprint, and
+# an attribute value that is not text.
+codec = { package = "xmip-core-library-codec", git = "https://github.com/IlleNilsson/xmip-core-library-codec", branch = "main" }
 
 [dev-dependencies]
 # A self-signed certificate for the handshake tests. Test-only.

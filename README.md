@@ -20,6 +20,17 @@ which was chosen, or none where a side offered nothing. HTTP agrees `h2` or
 `http/1.1` this way — the identifiers are HTTP's (`net::http::Version`),
 not this crate's.
 
+**Who the client is, before its content** (`peer`). `peer::answered`
+finishes a server's handshake on an accepted socket and reports the
+certificate its client presented, `Peer`: its subject and issuer as `Name`
+writes them and its SHA-256 fingerprint (`peer::fingerprint`). A server that
+verifies clients has refused one whose chain does not reach its anchors by
+then. `Name` is a distinguished name as its attributes, written in one
+order, so `CN=x,O=y` and `O = y, cn = x` are one name; it moved here from
+`xmip-core-authenticate` on 2026-10-19, so the name a transport writes and
+the name the identity gates compare are one reading (ADR-0033, amendment
+2026-10-19).
+
 **A key it cannot read.** `Identity::from_pem` presents a chain with its PEM
 key; `Identity::from_signer` presents a chain whose key its platform's
 keeper holds — the Android Keystore, the Secure Enclave, Windows CNG and the

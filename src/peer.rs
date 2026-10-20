@@ -197,7 +197,7 @@ mod tests {
     }
 
     #[test]
-    fn a_fingerprint_is_the_leafs_sha256_in_lowercase_hex() {
+    fn a_fingerprint_is_the_sha256_of_the_leaf_in_lowercase_hex() {
         assert_eq!(
             fingerprint(b"abc"),
             "SHA256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"

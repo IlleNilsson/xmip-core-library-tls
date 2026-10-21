@@ -29,7 +29,20 @@ then. `Name` is a distinguished name as its attributes, written in one
 order, so `CN=x,O=y` and `O = y, cn = x` are one name; it moved here from
 `xmip-core-authenticate` on 2026-10-19, so the name a transport writes and
 the name the identity gates compare are one reading (ADR-0033, amendment
-2026-10-19).
+2026-10-19). `peer::handshaken` finishes the handshake the same way and says
+of one that did not finish whether the client's certificate was refused —
+one that does not reach the anchors, or none where one is required — or the
+client merely stopped (`peer::Unanswered`), so a host tells its audit of the
+first alone; `peer::presented` hands the client's leaf over whole, DER.
+
+**A server a browser reaches.** `Identity::server_asking` presents the
+identity and asks the client for a certificate, verifying one presented
+against the anchors and refusing one that does not reach them, but lets a
+client that presents none through: a browser may decline, and is then no
+one, who only watches. A web host's HTTPS is this, through the runtime's
+`xmip_operate.h` section 21 (ADR-0009, amendment 2026-10-21);
+`Identity::server` refuses a client without a certificate, as everything
+between Xmip's own parts does.
 
 **A key it cannot read.** `Identity::from_pem` presents a chain with its PEM
 key; `Identity::from_signer` presents a chain whose key its platform's

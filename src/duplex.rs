@@ -44,6 +44,13 @@ pub struct Writing<C> {
     shared: Arc<Shared<C>>,
 }
 
+/// The reading side of a connection a server answered, named so a host
+/// that keeps one names no TLS stack of its own.
+pub type ServedReading = Reading<rustls::ServerConnection>;
+
+/// The writing side of a connection a server answered.
+pub type ServedWriting = Writing<rustls::ServerConnection>;
+
 /// A connection split in two, and the protocol it agreed by ALPN, if any.
 pub struct Split<C> {
     pub agreed: Option<Vec<u8>>,
@@ -208,7 +215,11 @@ mod tests {
     /// One side of a split connection.
     type Sides<C> = (Reading<C>, Writing<C>);
 
-    /// A client and a server, split, over loopback.
+    /// A client and a server, split, over loopback, Nagle's algorithm off as
+    /// every connection Xmip makes and accepts has it (`net::connect`,
+    /// `transport::socket::accept_tcp`): with it on, a record written after
+    /// the server's tickets waited for the client's delayed acknowledgement,
+    /// forty milliseconds on Linux, past the test's ten (2026-10-21).
     fn pair() -> (
         Sides<rustls::ClientConnection>,
         Sides<rustls::ServerConnection>,
@@ -227,11 +238,13 @@ mod tests {
 
         let near = std::thread::spawn(move || {
             let tcp = TcpStream::connect(address).expect("connected");
+            tcp.set_nodelay(true).expect("no delay");
             let stream = client_with("localhost", tcp, Arc::new(configure(roots))).expect("tls");
             let split = split(stream).expect("split");
             (split.reading, split.writing)
         });
         let (tcp, _) = listener.accept().expect("accepted");
+        tcp.set_nodelay(true).expect("no delay");
         let far = split(server(tcp, Arc::new(config)).expect("tls")).expect("split");
         (near.join().expect("client"), (far.reading, far.writing))
     }

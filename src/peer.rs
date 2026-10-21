@@ -29,15 +29,62 @@ pub fn answered(
     tcp: TcpStream,
     config: Arc<rustls::ServerConfig>,
 ) -> Result<(GuardedServer, Option<Peer>)> {
-    let mut guarded = server(tcp, config)?;
-    while guarded.conn.is_handshaking() {
-        guarded
-            .conn
-            .complete_io(&mut guarded.sock)
-            .map_err(|failure| TlsError::new(format!("the TLS handshake: {failure}")))?;
-    }
+    let guarded = handshaken(tcp, config).map_err(TlsError::from)?;
     let peer = Peer::of(&guarded.conn)?;
     Ok((guarded, peer))
+}
+
+/// Why a server's handshake did not finish, in two kinds: a host that
+/// tells its audit of a certificate refused tells nothing of a client that
+/// merely hung up.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Unanswered {
+    /// The client's certificate was refused: one that does not reach the
+    /// anchors, or none where the server requires one.
+    Refused(TlsError),
+    /// Anything else: the client stopped or spoke no TLS, the socket's wait
+    /// ran out, or the session could not start.
+    Failed(TlsError),
+}
+
+impl From<Unanswered> for TlsError {
+    fn from(unanswered: Unanswered) -> Self {
+        match unanswered {
+            Unanswered::Refused(said) | Unanswered::Failed(said) => said,
+        }
+    }
+}
+
+/// Answer a TLS connection on an accepted socket and finish its handshake,
+/// as [`answered`] does, saying of one that did not finish whether the
+/// client's certificate was refused ([`Unanswered`]). Who the client is
+/// the caller reads from the session ([`Peer::of`]).
+///
+/// # Errors
+///
+/// Where the handshake did not finish, by kind.
+pub fn handshaken(
+    tcp: TcpStream,
+    config: Arc<rustls::ServerConfig>,
+) -> core::result::Result<GuardedServer, Unanswered> {
+    let mut guarded = server(tcp, config).map_err(Unanswered::Failed)?;
+    while guarded.conn.is_handshaking() {
+        if let Err(failure) = guarded.conn.complete_io(&mut guarded.sock) {
+            let said = TlsError::new(format!("the TLS handshake: {failure}"));
+            let refused = matches!(
+                failure
+                    .get_ref()
+                    .and_then(|inner| inner.downcast_ref::<rustls::Error>()),
+                Some(rustls::Error::InvalidCertificate(_) | rustls::Error::NoCertificatesPresented)
+            );
+            return Err(if refused {
+                Unanswered::Refused(said)
+            } else {
+                Unanswered::Failed(said)
+            });
+        }
+    }
+    Ok(guarded)
 }
 
 /// What a client's certificate says of it.
@@ -74,6 +121,21 @@ impl Peer {
             fingerprint: fingerprint(leaf),
         }))
     }
+}
+
+/// The leaf the client of `connection` presented, DER, once its handshake
+/// has finished: what a host hands a surface that reads the certificate
+/// itself — a web host's `ConnectionInfo.ClientCertificate`. `None` where
+/// it presented none, or the handshake has not finished.
+#[must_use]
+pub fn presented(connection: &rustls::ServerConnection) -> Option<Vec<u8>> {
+    if connection.is_handshaking() {
+        return None;
+    }
+    connection
+        .peer_certificates()
+        .and_then(<[_]>::first)
+        .map(|leaf| leaf.as_ref().to_vec())
 }
 
 /// A certificate's SHA-256 fingerprint, `SHA256:` then lowercase hex: the
@@ -127,7 +189,22 @@ mod tests {
         client: Arc<rustls::ClientConfig>,
         server: &Identity,
     ) -> Result<(Option<Peer>, Vec<u8>)> {
-        let config = Arc::new(server.server().expect("a server"));
+        answer_by(client, server.server().expect("a server"))
+            .map(|(peer, _, read)| (peer, read))
+            .map_err(TlsError::from)
+    }
+
+    /// What a server answered of its client, the leaf it presented, and the
+    /// word it sent.
+    type Heard = (Option<Peer>, Option<Vec<u8>>, Vec<u8>);
+
+    /// As [`answer`], by a server configured `config`: what it heard, or
+    /// why not by kind.
+    fn answer_by(
+        client: Arc<rustls::ClientConfig>,
+        config: rustls::ServerConfig,
+    ) -> core::result::Result<Heard, Unanswered> {
+        let config = Arc::new(config);
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
         let address = listener.local_addr().expect("address");
         let caller = std::thread::spawn(move || {
@@ -142,10 +219,12 @@ mod tests {
             let _ = stream.read_to_end(&mut Vec::new());
         });
         let (tcp, _) = listener.accept().expect("accept");
-        let answered = answered(tcp, config).map(|(mut guarded, peer)| {
+        let answered = handshaken(tcp, config).and_then(|mut guarded| {
+            let peer = Peer::of(&guarded.conn).map_err(Unanswered::Failed)?;
+            let leaf = presented(&guarded.conn);
             let mut read = Vec::new();
             let _ = guarded.read_to_end(&mut read);
-            (peer, read)
+            Ok((peer, leaf, read))
         });
         caller.join().expect("the caller");
         answered
@@ -172,19 +251,7 @@ mod tests {
     fn a_client_another_authority_issued_is_refused_in_the_handshake() {
         let ours = authority();
         let server = identity(&ours, "localhost");
-        // Theirs, trusting ours so that only the server can refuse.
-        let theirs = authority();
-        let key = rcgen::KeyPair::generate().expect("a key");
-        let leaf = rcgen::CertificateParams::new(vec!["localhost".to_string()])
-            .expect("params")
-            .signed_by(&key, &theirs.0, &theirs.1)
-            .expect("issued");
-        let stranger = Identity::from_pem(
-            leaf.pem().as_bytes(),
-            key.serialize_pem().as_bytes(),
-            ours.0.pem().as_bytes(),
-        )
-        .expect("an identity");
+        let stranger = stranger(&ours);
         let refused = answer(Arc::new(stranger.client().expect("a client")), &server)
             .expect_err("a stranger");
         assert!(refused.message.contains("handshake"), "{refused}");
@@ -194,6 +261,55 @@ mod tests {
         let presents_nothing = crate::configure(roots);
         let refused = answer(Arc::new(presents_nothing), &server).expect_err("no certificate");
         assert!(refused.message.contains("handshake"), "{refused}");
+    }
+
+    #[test]
+    fn a_server_asking_names_its_anchors_client_lets_one_without_through_refuses_a_stranger() {
+        let ours = authority();
+        let server = identity(&ours, "localhost");
+        let asking = || server.server_asking().expect("a server");
+        let client = identity(&ours, "party-x.example")
+            .client()
+            .expect("a client");
+
+        let (peer, leaf, read) = answer_by(Arc::new(client), asking()).expect("answered");
+        let leaf = leaf.expect("the leaf it presented");
+        assert_eq!(peer.expect("named").fingerprint, fingerprint(&leaf));
+        assert_eq!(read, b"order");
+
+        let mut roots = rustls::RootCertStore::empty();
+        roots.add(ours.0.der().clone()).expect("an anchor");
+        let watcher = Arc::new(crate::configure(roots));
+        let (peer, leaf, read) = answer_by(watcher, asking()).expect("let through");
+        assert_eq!((peer, leaf), (None, None));
+        assert_eq!(read, b"order");
+
+        let stranger = stranger(&ours).client().expect("a client");
+        let refused = answer_by(Arc::new(stranger), asking()).expect_err("a stranger");
+        assert!(matches!(refused, Unanswered::Refused(_)), "{refused:?}");
+        let mut roots = rustls::RootCertStore::empty();
+        roots.add(ours.0.der().clone()).expect("an anchor");
+        let watcher = Arc::new(crate::configure(roots));
+        let required = answer_by(watcher, server.server().expect("a server"))
+            .expect_err("no certificate where one is required");
+        assert!(matches!(required, Unanswered::Refused(_)), "{required:?}");
+    }
+
+    /// An identity another authority issued, trusting `ours`, so that only
+    /// the server can refuse it.
+    fn stranger(ours: &(rcgen::Certificate, rcgen::KeyPair)) -> Identity {
+        let theirs = authority();
+        let key = rcgen::KeyPair::generate().expect("a key");
+        let leaf = rcgen::CertificateParams::new(vec!["localhost".to_string()])
+            .expect("params")
+            .signed_by(&key, &theirs.0, &theirs.1)
+            .expect("issued");
+        Identity::from_pem(
+            leaf.pem().as_bytes(),
+            key.serialize_pem().as_bytes(),
+            ours.0.pem().as_bytes(),
+        )
+        .expect("an identity")
     }
 
     #[test]

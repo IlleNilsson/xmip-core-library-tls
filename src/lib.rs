@@ -38,7 +38,16 @@
 //! a server's handshake and reads the certificate its client presented —
 //! subject and issuer as [`Name`] writes them, and the fingerprint — which a
 //! transport that terminates TLS reports on its arrival for the identity
-//! gates (ADR-0033, amendment 2026-10-19).
+//! gates (ADR-0033, amendment 2026-10-19). [`peer::handshaken`] finishes it
+//! saying of one that did not finish whether the client's certificate was
+//! refused or it merely stopped ([`peer::Unanswered`]), and
+//! [`peer::presented`] hands the leaf over whole, DER.
+//!
+//! **A server a browser reaches.** [`Identity::server_asking`] asks the
+//! client for a certificate and verifies one presented against the anchors,
+//! as [`Identity::server`] does, but lets a client that presents none
+//! through: a browser may decline, and is then no one. A web host's HTTPS
+//! is this (ADR-0009, amendment 2026-10-21).
 //!
 //! **Read on one thread, written on another.** [`duplex::split`] gives a
 //! connection's two directions to two threads, so a protocol that streams

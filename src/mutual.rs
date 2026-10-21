@@ -77,12 +77,38 @@ impl Identity {
     ///
     /// Where the anchors are empty.
     pub fn server(&self) -> Result<rustls::ServerConfig> {
-        let verifier = rustls::server::WebPkiClientVerifier::builder_with_provider(
+        self.served(false)
+    }
+
+    /// The server side a browser reaches (ADR-0009, amendment 2026-10-21):
+    /// presents this identity and asks the client for a certificate,
+    /// verifying one presented against the anchors and refusing one that
+    /// does not reach them; a client that presents none is let through,
+    /// and [`crate::Peer::of`] then answers `None` — no one, who only
+    /// watches.
+    ///
+    /// # Errors
+    ///
+    /// Where the anchors are empty.
+    pub fn server_asking(&self) -> Result<rustls::ServerConfig> {
+        self.served(true)
+    }
+
+    /// A server presenting this identity, verifying a client's certificate
+    /// against the anchors; `asking`, a client may present none.
+    fn served(&self, asking: bool) -> Result<rustls::ServerConfig> {
+        let builder = rustls::server::WebPkiClientVerifier::builder_with_provider(
             Arc::clone(&self.anchors),
             provider(),
-        )
-        .build()
-        .map_err(|failure| TlsError::new(format!("the client verifier: {failure}")))?;
+        );
+        let builder = if asking {
+            builder.allow_unauthenticated()
+        } else {
+            builder
+        };
+        let verifier = builder
+            .build()
+            .map_err(|failure| TlsError::new(format!("the client verifier: {failure}")))?;
         Ok(rustls::ServerConfig::builder_with_provider(provider())
             .with_protocol_versions(rustls::DEFAULT_VERSIONS)
             .unwrap_or_else(|_| unreachable!("the default versions are always supported"))

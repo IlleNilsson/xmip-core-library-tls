@@ -146,6 +146,26 @@ pub fn fingerprint(certificate: &[u8]) -> String {
     format!("SHA256:{}", codec::hex::encode(digest.as_ref()))
 }
 
+/// Whether the certificate `der` authenticates a server: its extended key
+/// usage names `serverAuth`. A node's certificate does, between nodes both
+/// ways; a person's authenticates a client alone (ADR-0034), so a plane
+/// that serves Xmip's own parts tells the two apart by it. False for a
+/// certificate that is not X.509 or names no extended key usage.
+#[must_use]
+pub fn authenticates_servers(der: &[u8]) -> bool {
+    use x509_parser::prelude::{FromDer, X509Certificate};
+    X509Certificate::from_der(der)
+        .ok()
+        .and_then(|(_, parsed)| {
+            parsed
+                .extended_key_usage()
+                .ok()
+                .flatten()
+                .map(|eku| eku.value.server_auth)
+        })
+        .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::{Read, Write};
@@ -153,6 +173,23 @@ mod tests {
 
     use super::*;
     use crate::{Identity, client_with};
+
+    #[test]
+    fn a_nodes_certificate_authenticates_servers_and_a_persons_does_not() {
+        let key = rcgen::KeyPair::generate().expect("a key");
+        let mut node = rcgen::CertificateParams::new(vec!["n.example".to_string()]).expect("p");
+        node.extended_key_usages = vec![
+            rcgen::ExtendedKeyUsagePurpose::ServerAuth,
+            rcgen::ExtendedKeyUsagePurpose::ClientAuth,
+        ];
+        let node = node.self_signed(&key).expect("signed");
+        assert!(authenticates_servers(node.der()));
+        let mut person = rcgen::CertificateParams::new(Vec::<String>::new()).expect("p");
+        person.extended_key_usages = vec![rcgen::ExtendedKeyUsagePurpose::ClientAuth];
+        let person = person.self_signed(&key).expect("signed");
+        assert!(!authenticates_servers(person.der()));
+        assert!(!authenticates_servers(b"not a certificate"));
+    }
 
     /// An authority, as PEM with its signing half.
     fn authority() -> (rcgen::Certificate, rcgen::KeyPair) {

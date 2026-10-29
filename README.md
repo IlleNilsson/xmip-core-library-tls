@@ -23,7 +23,10 @@ not this crate's.
 **Who the client is, before its content** (`peer`). `peer::answered`
 finishes a server's handshake on an accepted socket and reports the
 certificate its client presented, `Peer`: its subject and issuer as `Name`
-writes them and its SHA-256 fingerprint (`peer::fingerprint`). A server that
+writes them and its SHA-256 fingerprint (`peer::fingerprint`). `peer::authenticates_servers` says
+whether a certificate's extended key usage names `serverAuth` — a node's
+does, a person's does not — which the Storage wire admits by (ADR-0009,
+amendment 2026-10-29). A server that
 verifies clients has refused one whose chain does not reach its anchors by
 then. `Name` is a distinguished name as its attributes, written in one
 order, so `CN=x,O=y` and `O = y, cn = x` are one name; it moved here from

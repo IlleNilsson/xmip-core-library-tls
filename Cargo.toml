@@ -33,6 +33,14 @@ aws-lc-rs = { version = "1", features = ["prebuilt-nasm"] }
 # an attribute value that is not text.
 codec = { package = "xmip-core-library-codec", git = "https://github.com/IlleNilsson/xmip-core-library-codec", branch = "main" }
 
+# The module's timing program (doc/governance/rust-style.md section 5c): a
+# plain cargo test leaves it out, and the landing runs it after every other
+# test here, alone, one test at a time, so what it measures is Xmip's work.
+[[test]]
+name = "measured"
+path = "tests/measured/main.rs"
+test = false
+
 [dev-dependencies]
 # A self-signed certificate for the handshake tests. Test-only.
 rcgen = "0.13"

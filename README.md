@@ -38,6 +38,32 @@ one that does not reach the anchors, or none where one is required — or the
 client merely stopped (`peer::Unanswered`), so a host tells its audit of the
 first alone; `peer::presented` hands the client's leaf over whole, DER.
 
+**A browser's key, proven to a node that did not serve it** (`possession`;
+ADR-0009, amendment 2026-11-02). A web host takes its browsers' TLS and the
+nodes decide who acts, so the proof is the handshake itself.
+`possession::proving` is the one configuration that makes it: the host's
+identity, a client's certificate asked for, no session resumed — a resumed
+session signs nothing — and a random source that, on a thread a handshake
+is armed on, writes `possession::binding` of the nodes' fresh nonces into
+the first 24 bytes of every 32-byte random it draws, the `ServerHello`'s
+among them (rustls 0.23.45 draws one for a `HelloRetryRequest` and another
+for the `ServerHello`, and TLS 1.2 a session ID after it; the last 8 bytes
+stay random, TLS 1.2's downgrade sentinel there). `possession::handshaken`
+makes the handshake over a recording of the socket, and its
+`Recorded::transcript` recovers the transcript after, apart from the
+handshake — the handshake messages from the ClientHello through the
+client's CertificateVerify — reading TLS 1.3's sealed handshake records
+with the two handshake traffic secrets its own key log keeps for that one
+handshake and zeroes after; they are never written, logged or kept on the
+session. `possession::proved` is the node's check: the client's
+CertificateVerify verified with its own certificate's key over the messages
+before it, as TLS 1.3 signs them (a retried handshake's first ClientHello
+as its `message_hash`) or as TLS 1.2 does, answering the client's chain,
+the server's leaf and the random. Tests pin the draw order for TLS 1.3, 1.3
+retried and 1.2; the timing program holds binding and recording to under a
+millisecond added to a handshake, and the check to under one (about 0.15 ms
+and 0.35 ms, debug build).
+
 **A server a browser reaches.** `Identity::server_asking` presents the
 identity and asks the client for a certificate, verifying one presented
 against the anchors and refusing one that does not reach them, but lets a

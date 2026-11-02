@@ -206,48 +206,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::net::TcpListener;
     use std::time::Duration;
 
     use super::*;
-    use crate::{client_with, configure, server, server_config};
-
-    /// One side of a split connection.
-    type Sides<C> = (Reading<C>, Writing<C>);
-
-    /// A client and a server, split, over loopback, Nagle's algorithm off as
-    /// every connection Xmip makes and accepts has it (`net::connect`,
-    /// `transport::socket::accept_tcp`): with it on, a record written after
-    /// the server's tickets waited for the client's delayed acknowledgement,
-    /// forty milliseconds on Linux, past the test's ten (2026-10-21).
-    fn pair() -> (
-        Sides<rustls::ClientConnection>,
-        Sides<rustls::ServerConnection>,
-    ) {
-        let signed = rcgen::generate_simple_self_signed(vec!["localhost".to_string()])
-            .expect("a certificate");
-        let config = server_config(
-            signed.cert.pem().as_bytes(),
-            signed.key_pair.serialize_pem().as_bytes(),
-        )
-        .expect("server config");
-        let mut roots = rustls::RootCertStore::empty();
-        roots.add(signed.cert.der().clone()).expect("trusted");
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bound");
-        let address = listener.local_addr().expect("address");
-
-        let near = std::thread::spawn(move || {
-            let tcp = TcpStream::connect(address).expect("connected");
-            tcp.set_nodelay(true).expect("no delay");
-            let stream = client_with("localhost", tcp, Arc::new(configure(roots))).expect("tls");
-            let split = split(stream).expect("split");
-            (split.reading, split.writing)
-        });
-        let (tcp, _) = listener.accept().expect("accepted");
-        tcp.set_nodelay(true).expect("no delay");
-        let far = split(server(tcp, Arc::new(config)).expect("tls")).expect("split");
-        (near.join().expect("client"), (far.reading, far.writing))
-    }
+    use crate::fixture::pair;
 
     #[test]
     fn one_side_writes_while_the_other_waits_reading_on_the_same_connection() {

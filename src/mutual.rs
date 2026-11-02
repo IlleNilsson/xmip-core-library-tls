@@ -97,9 +97,19 @@ impl Identity {
     /// A server presenting this identity, verifying a client's certificate
     /// against the anchors; `asking`, a client may present none.
     fn served(&self, asking: bool) -> Result<rustls::ServerConfig> {
+        self.served_by(asking, provider())
+    }
+
+    /// The same, built from `provider`: the general one, or the proving
+    /// one of `possession`.
+    pub(crate) fn served_by(
+        &self,
+        asking: bool,
+        provider: Arc<rustls::crypto::CryptoProvider>,
+    ) -> Result<rustls::ServerConfig> {
         let builder = rustls::server::WebPkiClientVerifier::builder_with_provider(
             Arc::clone(&self.anchors),
-            provider(),
+            Arc::clone(&provider),
         );
         let builder = if asking {
             builder.allow_unauthenticated()
@@ -109,7 +119,7 @@ impl Identity {
         let verifier = builder
             .build()
             .map_err(|failure| TlsError::new(format!("the client verifier: {failure}")))?;
-        Ok(rustls::ServerConfig::builder_with_provider(provider())
+        Ok(rustls::ServerConfig::builder_with_provider(provider)
             .with_protocol_versions(rustls::DEFAULT_VERSIONS)
             .unwrap_or_else(|_| unreachable!("the default versions are always supported"))
             .with_client_cert_verifier(verifier)

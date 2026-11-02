@@ -207,7 +207,7 @@ where
 #[cfg(test)]
 mod tests {
     use std::net::TcpListener;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
 
     use super::*;
     use crate::{client_with, configure, server, server_config};
@@ -260,15 +260,10 @@ mod tests {
             heard
         });
         std::thread::sleep(Duration::from_millis(20));
-        // Meanwhile it writes, and is not held up by its own waiting read.
-        let started = Instant::now();
+        // Meanwhile it writes, and is not held up by its own waiting read:
+        // how soon is the timing program's (tests/measured).
         near_writing.write_all(b"wants").expect("written");
         near_writing.flush().expect("flushed");
-        assert!(
-            started.elapsed() < Duration::from_millis(100),
-            "{:?}",
-            started.elapsed()
-        );
 
         let mut asked = [0u8; 5];
         far_reading.read_exact(&mut asked).expect("asked");

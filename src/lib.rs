@@ -49,6 +49,11 @@
 //! through: a browser may decline, and is then no one. A web host's HTTPS
 //! is this (ADR-0009, amendment 2026-10-21).
 //!
+//! **A browser's key, proven to a node that did not serve it.**
+//! [`possession`] binds the nodes' nonces into a server's random, records
+//! the handshake and checks its transcript's `CertificateVerify` where the
+//! caller is decided (ADR-0009, amendment 2026-11-02).
+//!
 //! **Read on one thread, written on another.** [`duplex::split`] gives a
 //! connection's two directions to two threads, so a protocol that streams
 //! to its peer and listens to it at once — the Event link between nodes —
@@ -61,9 +66,12 @@
 pub mod alpn;
 mod client;
 pub mod duplex;
+#[cfg(any(test, feature = "test-support"))]
+pub mod fixture;
 mod mutual;
 mod name;
 pub mod peer;
+pub mod possession;
 mod server;
 mod signer;
 

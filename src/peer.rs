@@ -68,8 +68,24 @@ pub fn handshaken(
     config: Arc<rustls::ServerConfig>,
 ) -> core::result::Result<GuardedServer, Unanswered> {
     let mut guarded = server(tcp, config).map_err(Unanswered::Failed)?;
-    while guarded.conn.is_handshaking() {
-        if let Err(failure) = guarded.conn.complete_io(&mut guarded.sock) {
+    completed(&mut guarded.conn, &mut guarded.sock)?;
+    Ok(guarded)
+}
+
+/// `connection`'s handshake, driven over `io` until it has finished, saying
+/// of one that did not whether the client's certificate was refused: the
+/// one loop every server's handshake here runs, over its socket or over a
+/// recording of it (`possession`).
+///
+/// # Errors
+///
+/// Where the handshake did not finish, by kind.
+pub(crate) fn completed(
+    connection: &mut rustls::ServerConnection,
+    io: &mut (impl std::io::Read + std::io::Write),
+) -> core::result::Result<(), Unanswered> {
+    while connection.is_handshaking() {
+        if let Err(failure) = connection.complete_io(io) {
             let said = TlsError::new(format!("the TLS handshake: {failure}"));
             let refused = matches!(
                 failure
@@ -84,7 +100,7 @@ pub fn handshaken(
             });
         }
     }
-    Ok(guarded)
+    Ok(())
 }
 
 /// What a client's certificate says of it.

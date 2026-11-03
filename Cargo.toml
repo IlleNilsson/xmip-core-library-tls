@@ -25,7 +25,7 @@ rustls-pemfile = "2"
 # A certificate's subject and issuer, which rustls keeps as DER (`name`):
 # what a server that terminates TLS reports of its client (`peer`), and
 # what the identity gates compare a claim with.
-x509-parser = "0.16"
+x509-parser = "0.18"
 # The leaf's SHA-256 fingerprint (`peer`), from the provider rustls already
 # brings, its assembler prebuilt.
 aws-lc-rs = { version = "1", features = ["prebuilt-nasm"] }
@@ -38,7 +38,7 @@ codec = { package = "xmip-core-library-codec", git = "https://github.com/IlleNil
 zeroize = "1"
 # A self-signed certificate for the split connection the tests and the
 # timing program share (`fixture::pair`), only with `test-support`.
-rcgen = { version = "0.13", optional = true }
+rcgen = { version = "0.14", optional = true }
 
 [features]
 # The connection this crate's tests and its timing program both stand up
@@ -57,7 +57,7 @@ required-features = ["test-support"]
 
 [dev-dependencies]
 # A self-signed certificate for the handshake tests. Test-only.
-rcgen = "0.13"
+rcgen = "0.14"
 
 [lints.rust]
 # forbid, not deny: a module has no business writing unsafe. The one exception

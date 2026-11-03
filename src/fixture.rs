@@ -31,7 +31,7 @@ pub fn pair() -> (
         rcgen::generate_simple_self_signed(vec!["localhost".to_string()]).expect("a certificate");
     let config = server_config(
         signed.cert.pem().as_bytes(),
-        signed.key_pair.serialize_pem().as_bytes(),
+        signed.signing_key.serialize_pem().as_bytes(),
     )
     .expect("server config");
     let mut roots = rustls::RootCertStore::empty();

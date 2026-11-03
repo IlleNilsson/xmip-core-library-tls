@@ -206,28 +206,22 @@ mod tests {
         key: String,
     }
 
-    fn issued(authority: &rcgen::CertifiedKey, name: &str) -> Issued {
+    fn issued(authority: &rcgen::CertifiedIssuer<'_, rcgen::KeyPair>, name: &str) -> Issued {
         let key = rcgen::KeyPair::generate().expect("a key");
         let params = rcgen::CertificateParams::new(vec![name.to_string()]).expect("params");
-        let leaf = params
-            .signed_by(&key, &authority.cert, &authority.key_pair)
-            .expect("issued");
+        let leaf = params.signed_by(&key, authority).expect("issued");
         Issued {
-            authority: authority.cert.pem(),
+            authority: authority.pem(),
             certificate: leaf.pem(),
             key: key.serialize_pem(),
         }
     }
 
-    fn authority() -> rcgen::CertifiedKey {
+    fn authority() -> rcgen::CertifiedIssuer<'static, rcgen::KeyPair> {
         let mut params = rcgen::CertificateParams::new(Vec::<String>::new()).expect("params");
         params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
         let key = rcgen::KeyPair::generate().expect("a key");
-        let cert = params.self_signed(&key).expect("signed");
-        rcgen::CertifiedKey {
-            cert,
-            key_pair: key,
-        }
+        rcgen::CertifiedIssuer::self_signed(params, key).expect("signed")
     }
 
     fn identity(issued: &Issued) -> Identity {
@@ -279,7 +273,7 @@ mod tests {
         let foreign = Identity::from_pem(
             stranger.certificate.as_bytes(),
             stranger.key.as_bytes(),
-            ours.cert.pem().as_bytes(),
+            ours.pem().as_bytes(),
         )
         .expect("identity");
         assert!(!ping(
@@ -288,7 +282,7 @@ mod tests {
         ));
 
         let mut roots = rustls::RootCertStore::empty();
-        roots.add(ours.cert.der().clone()).expect("anchor");
+        roots.add(ours.der().clone()).expect("anchor");
         assert!(!ping(Arc::new(configure(roots)), &identity(&far)));
     }
 
@@ -380,7 +374,7 @@ mod tests {
     #[test]
     fn a_client_trusts_only_the_anchors_it_is_given_and_none_is_refused() {
         let ours = authority();
-        assert!(trusting(ours.cert.pem().as_bytes()).is_ok());
+        assert!(trusting(ours.pem().as_bytes()).is_ok());
         let refused = trusting(b"").expect_err("refused");
         assert!(refused.message.contains("no certificate"), "{refused}");
     }

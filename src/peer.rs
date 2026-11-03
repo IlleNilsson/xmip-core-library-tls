@@ -208,18 +208,18 @@ mod tests {
     }
 
     /// An authority, as PEM with its signing half.
-    fn authority() -> (rcgen::Certificate, rcgen::KeyPair) {
+    fn authority() -> rcgen::CertifiedIssuer<'static, rcgen::KeyPair> {
         let mut params = rcgen::CertificateParams::new(Vec::<String>::new()).expect("params");
         params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
         params
             .distinguished_name
             .push(rcgen::DnType::CommonName, "Party CA");
         let key = rcgen::KeyPair::generate().expect("a key");
-        (params.self_signed(&key).expect("signed"), key)
+        rcgen::CertifiedIssuer::self_signed(params, key).expect("signed")
     }
 
     /// An identity `CN=<name>` the authority issued, trusting it.
-    fn identity(by: &(rcgen::Certificate, rcgen::KeyPair), name: &str) -> Identity {
+    fn identity(by: &rcgen::CertifiedIssuer<'_, rcgen::KeyPair>, name: &str) -> Identity {
         let key = rcgen::KeyPair::generate().expect("a key");
         let mut params =
             rcgen::CertificateParams::new(vec!["localhost".to_string()]).expect("params");
@@ -227,11 +227,11 @@ mod tests {
         params
             .distinguished_name
             .push(rcgen::DnType::CommonName, name);
-        let leaf = params.signed_by(&key, &by.0, &by.1).expect("issued");
+        let leaf = params.signed_by(&key, by).expect("issued");
         Identity::from_pem(
             leaf.pem().as_bytes(),
             key.serialize_pem().as_bytes(),
-            by.0.pem().as_bytes(),
+            by.pem().as_bytes(),
         )
         .expect("an identity")
     }
@@ -310,7 +310,7 @@ mod tests {
         assert!(refused.message.contains("handshake"), "{refused}");
 
         let mut roots = rustls::RootCertStore::empty();
-        roots.add(ours.0.der().clone()).expect("an anchor");
+        roots.add(ours.der().clone()).expect("an anchor");
         let presents_nothing = crate::configure(roots);
         let refused = answer(Arc::new(presents_nothing), &server).expect_err("no certificate");
         assert!(refused.message.contains("handshake"), "{refused}");
@@ -331,7 +331,7 @@ mod tests {
         assert_eq!(read, b"order");
 
         let mut roots = rustls::RootCertStore::empty();
-        roots.add(ours.0.der().clone()).expect("an anchor");
+        roots.add(ours.der().clone()).expect("an anchor");
         let watcher = Arc::new(crate::configure(roots));
         let (peer, leaf, read) = answer_by(watcher, asking()).expect("let through");
         assert_eq!((peer, leaf), (None, None));
@@ -341,7 +341,7 @@ mod tests {
         let refused = answer_by(Arc::new(stranger), asking()).expect_err("a stranger");
         assert!(matches!(refused, Unanswered::Refused(_)), "{refused:?}");
         let mut roots = rustls::RootCertStore::empty();
-        roots.add(ours.0.der().clone()).expect("an anchor");
+        roots.add(ours.der().clone()).expect("an anchor");
         let watcher = Arc::new(crate::configure(roots));
         let required = answer_by(watcher, server.server().expect("a server"))
             .expect_err("no certificate where one is required");
@@ -350,17 +350,17 @@ mod tests {
 
     /// An identity another authority issued, trusting `ours`, so that only
     /// the server can refuse it.
-    fn stranger(ours: &(rcgen::Certificate, rcgen::KeyPair)) -> Identity {
+    fn stranger(ours: &rcgen::CertifiedIssuer<'_, rcgen::KeyPair>) -> Identity {
         let theirs = authority();
         let key = rcgen::KeyPair::generate().expect("a key");
         let leaf = rcgen::CertificateParams::new(vec!["localhost".to_string()])
             .expect("params")
-            .signed_by(&key, &theirs.0, &theirs.1)
+            .signed_by(&key, &theirs)
             .expect("issued");
         Identity::from_pem(
             leaf.pem().as_bytes(),
             key.serialize_pem().as_bytes(),
-            ours.0.pem().as_bytes(),
+            ours.pem().as_bytes(),
         )
         .expect("an identity")
     }

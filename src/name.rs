@@ -184,14 +184,14 @@ mod tests {
             .distinguished_name
             .push(rcgen::DnType::CommonName, "Party CA");
         let key = rcgen::KeyPair::generate().expect("a key");
-        let authority = params.self_signed(&key).expect("signed");
+        let authority = rcgen::Issuer::new(params, key);
         let leaf_key = rcgen::KeyPair::generate().expect("a key");
         let mut leaf =
             rcgen::CertificateParams::new(vec!["party-x.example".into()]).expect("params");
         leaf.distinguished_name = rcgen::DistinguishedName::new();
         leaf.distinguished_name
             .push(rcgen::DnType::CommonName, "party-x.example");
-        let leaf = leaf.signed_by(&leaf_key, &authority, &key).expect("issued");
+        let leaf = leaf.signed_by(&leaf_key, &authority).expect("issued");
 
         let subject = Name::subject_of(leaf.der()).expect("a subject");
         assert_eq!(subject.to_string(), "CN=party-x.example");

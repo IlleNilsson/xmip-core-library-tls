@@ -9,7 +9,7 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
 use std::time::Duration;
 
-use rcgen::{CertificateParams, ExtendedKeyUsagePurpose, IsCa, KeyPair};
+use rcgen::{CertificateParams, CertifiedIssuer, ExtendedKeyUsagePurpose, IsCa, KeyPair};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 
 use super::{binding, handshaken, proved, proving};
@@ -28,14 +28,12 @@ fn parties() -> Parties {
     let authority_key = KeyPair::generate().expect("a key");
     let mut params = CertificateParams::new(Vec::<String>::new()).expect("params");
     params.is_ca = IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
-    let authority = params.self_signed(&authority_key).expect("an authority");
+    let authority = CertifiedIssuer::self_signed(params, authority_key).expect("an authority");
     let issue = |purpose: ExtendedKeyUsagePurpose, name: &str| {
         let key = KeyPair::generate().expect("a key");
         let mut params = CertificateParams::new(vec![name.to_string()]).expect("params");
         params.extended_key_usages = vec![purpose];
-        let issued = params
-            .signed_by(&key, &authority, &authority_key)
-            .expect("issued");
+        let issued = params.signed_by(&key, &authority).expect("issued");
         (issued, key)
     };
     let (server, server_key) = issue(ExtendedKeyUsagePurpose::ServerAuth, "localhost");

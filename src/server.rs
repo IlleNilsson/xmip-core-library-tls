@@ -61,7 +61,7 @@ mod tests {
     use super::*;
     use crate::client::{client_with, configure};
 
-    fn self_signed() -> rcgen::CertifiedKey {
+    fn self_signed() -> rcgen::CertifiedKey<rcgen::KeyPair> {
         rcgen::generate_simple_self_signed(vec!["localhost".to_string()])
             .expect("generating a cert")
     }
@@ -75,7 +75,7 @@ mod tests {
         let config = Arc::new(
             server_config(
                 signed.cert.pem().as_bytes(),
-                signed.key_pair.serialize_pem().as_bytes(),
+                signed.signing_key.serialize_pem().as_bytes(),
             )
             .expect("server config"),
         );
@@ -153,7 +153,7 @@ mod tests {
     #[test]
     fn a_certificate_that_is_not_one_is_refused_by_reason() {
         let signed = self_signed();
-        let key = signed.key_pair.serialize_pem();
+        let key = signed.signing_key.serialize_pem();
         let failure = server_config(b"not a cert", key.as_bytes()).expect_err("refused");
 
         assert!(failure.message.contains("no certificate"), "{failure}");

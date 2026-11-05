@@ -12,11 +12,44 @@ use crate::{client_with, configure, server, server_config};
 /// One side of a split connection.
 pub type Sides<C> = (Reading<C>, Writing<C>);
 
-/// A client and a server, split, over loopback, Nagle's algorithm off as
-/// every connection Xmip makes and accepts has it (`net::connect`,
-/// `transport::socket::accept_tcp`): with it on, a record written after
-/// the server's tickets waited for the client's delayed acknowledgement,
-/// forty milliseconds on Linux, past the test's ten (2026-10-21).
+/// How long the near end waits for loopback to take its connection.
+const CONNECTING: Duration = Duration::from_secs(5);
+
+/// A loopback connection's two ends, near and far, made and accepted on the
+/// calling thread before either end's handshake starts, Nagle's algorithm
+/// off on both as every connection Xmip makes and accepts has it
+/// (`net::connect`, `transport::socket::accept_tcp`).
+///
+/// Connected first, then accepted: a listener takes a connection into its
+/// backlog without waiting for `accept`, so the accept finds it there and
+/// returns at once, and a connection the system refuses fails here, in
+/// words. Until 2026-11-04 every test connected on a thread of its own and
+/// accepted on the test's, and a connect Windows refused — its outgoing
+/// ports used up by the machine (Tcpip event 4227) — ended that thread
+/// while the test waited in `accept` for a connection that never came, for
+/// two hours.
+///
+/// # Panics
+///
+/// When the listener cannot be bound, the connection is refused or not
+/// taken within five seconds, or Nagle's algorithm cannot be turned off: a
+/// test's connection, failing it.
+#[must_use]
+pub fn connected() -> (TcpStream, TcpStream) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bound");
+    let address = listener.local_addr().expect("address");
+    let near = TcpStream::connect_timeout(&address, CONNECTING).expect("connected");
+    // bounded: the connection above is in the backlog already
+    let (far, _) = listener.accept().expect("accepted");
+    near.set_nodelay(true).expect("no delay");
+    far.set_nodelay(true).expect("no delay");
+    (near, far)
+}
+
+/// A client and a server, split, over loopback ([`connected`]): with
+/// Nagle's algorithm on, a record written after the server's tickets
+/// waited for the client's delayed acknowledgement, forty milliseconds on
+/// Linux, past the test's ten (2026-10-21).
 ///
 /// # Panics
 ///
@@ -36,19 +69,13 @@ pub fn pair() -> (
     .expect("server config");
     let mut roots = rustls::RootCertStore::empty();
     roots.add(signed.cert.der().clone()).expect("trusted");
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bound");
-    let address = listener.local_addr().expect("address");
+    let (near, far) = connected();
 
     let near = std::thread::spawn(move || {
-        let tcp = TcpStream::connect_timeout(&address, Duration::from_secs(5)).expect("connected");
-        tcp.set_nodelay(true).expect("no delay");
-        let stream = client_with("localhost", tcp, Arc::new(configure(roots))).expect("tls");
+        let stream = client_with("localhost", near, Arc::new(configure(roots))).expect("tls");
         let split = split(stream).expect("split");
         (split.reading, split.writing)
     });
-    // bounded: the near end connects on loopback on the thread above, or fails
-    let (tcp, _) = listener.accept().expect("accepted");
-    tcp.set_nodelay(true).expect("no delay");
-    let far = split(server(tcp, Arc::new(config)).expect("tls")).expect("split");
+    let far = split(server(far, Arc::new(config)).expect("tls")).expect("split");
     (near.join().expect("client"), (far.reading, far.writing))
 }

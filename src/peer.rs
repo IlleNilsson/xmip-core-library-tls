@@ -185,9 +185,9 @@ pub fn authenticates_servers(der: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use std::io::{Read, Write};
-    use std::net::TcpListener;
 
     use super::*;
+    use crate::fixture::connected;
     use crate::{Identity, client_with};
 
     #[test]
@@ -258,11 +258,9 @@ mod tests {
         config: rustls::ServerConfig,
     ) -> core::result::Result<Heard, Unanswered> {
         let config = Arc::new(config);
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
-        let address = listener.local_addr().expect("address");
+        let (calling, tcp) = connected();
         let caller = std::thread::spawn(move || {
-            let tcp = std::net::TcpStream::connect(address).expect("connect");
-            let mut stream = client_with("localhost", tcp, client).expect("client");
+            let mut stream = client_with("localhost", calling, client).expect("client");
             let _ = stream.write_all(b"order");
             // Ended as TLS ends a Stream, and read to the server's close:
             // a socket closed with the server's session tickets unread is
@@ -271,7 +269,6 @@ mod tests {
             let _ = stream.flush();
             let _ = stream.read_to_end(&mut Vec::new());
         });
-        let (tcp, _) = listener.accept().expect("accept");
         let answered = handshaken(tcp, config).and_then(|mut guarded| {
             let peer = Peer::of(&guarded.conn).map_err(Unanswered::Failed)?;
             let leaf = presented(&guarded.conn);

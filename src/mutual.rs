@@ -194,9 +194,9 @@ fn certificates_of(
 #[cfg(test)]
 mod tests {
     use std::io::{Read, Write};
-    use std::net::{TcpListener, TcpStream};
 
     use super::*;
+    use crate::fixture::connected;
     use crate::{client_with, server};
 
     /// An authority, and a leaf it issued for `name`, as PEM.
@@ -237,17 +237,14 @@ mod tests {
     /// `far`: whether it went through.
     fn ping(near: Arc<rustls::ClientConfig>, far: &Identity) -> bool {
         let config = Arc::new(far.server().expect("server config"));
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
-        let address = listener.local_addr().expect("address");
+        let (calling, tcp) = connected();
         let caller = std::thread::spawn(move || {
-            let tcp = TcpStream::connect(address).expect("connect");
-            let mut stream = client_with("localhost", tcp, near).expect("client");
+            let mut stream = client_with("localhost", calling, near).expect("client");
             stream.write_all(b"ping").is_ok() && stream.flush().is_ok() && {
                 let mut back = [0u8; 4];
                 stream.read_exact(&mut back).is_ok()
             }
         });
-        let (tcp, _) = listener.accept().expect("accept");
         let mut guarded = server(tcp, config).expect("server");
         let mut received = [0u8; 4];
         if guarded.read_exact(&mut received).is_ok() {

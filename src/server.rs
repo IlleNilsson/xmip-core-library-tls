@@ -56,10 +56,10 @@ pub fn server(tcp: TcpStream, config: Arc<rustls::ServerConfig>) -> Result<Guard
 #[cfg(test)]
 mod tests {
     use std::io::{Read, Write};
-    use std::net::TcpListener;
 
     use super::*;
     use crate::client::{client_with, configure};
+    use crate::fixture::connected;
 
     fn self_signed() -> rcgen::CertifiedKey<rcgen::KeyPair> {
         rcgen::generate_simple_self_signed(vec!["localhost".to_string()])
@@ -80,8 +80,7 @@ mod tests {
             .expect("server config"),
         );
 
-        let listener = TcpListener::bind("127.0.0.1:0").expect("binding");
-        let address = listener.local_addr().expect("address").to_string();
+        let (calling, tcp) = connected();
         let trusted = signed.cert.der().clone();
 
         let caller = std::thread::spawn(move || {
@@ -103,8 +102,7 @@ mod tests {
                         .with_no_client_auth()
                 }
             };
-            let tcp = std::net::TcpStream::connect(&address).expect("connect");
-            let mut stream = client_with("localhost", tcp, Arc::new(client)).expect("client");
+            let mut stream = client_with("localhost", calling, Arc::new(client)).expect("client");
             stream.write_all(b"ping").expect("write");
             stream.flush().expect("flush");
             let mut back = [0u8; 4];
@@ -117,7 +115,6 @@ mod tests {
                 .name()
         });
 
-        let (tcp, _) = listener.accept().expect("accept");
         let mut guarded = server(tcp, config).expect("server session");
         let mut received = [0u8; 4];
         guarded.read_exact(&mut received).expect("read ping");

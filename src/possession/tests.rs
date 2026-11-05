@@ -5,7 +5,6 @@
 //! draws its randoms — and a transcript that is not the handshake's, or a
 //! handshake with no certificate, proving nothing.
 
-use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -13,6 +12,7 @@ use rcgen::{CertificateParams, CertifiedIssuer, ExtendedKeyUsagePurpose, IsCa, K
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 
 use super::{binding, handshaken, proved, proving};
+use crate::fixture::connected;
 use crate::{Identity, Result};
 
 /// A test authority, the server's identity under it, and a client's
@@ -63,8 +63,6 @@ fn handshake(
     bound: [u8; super::BINDING],
 ) -> Result<Vec<u8>> {
     let config = Arc::new(proving(&parties.server).expect("proving"));
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bound");
-    let address = listener.local_addr().expect("address");
     let provider = Arc::new(rustls::crypto::CryptoProvider {
         kx_groups: groups.to_vec(),
         ..(*crate::provider()).clone()
@@ -83,22 +81,19 @@ fn handshake(
     } else {
         builder.with_no_client_auth()
     };
+    let (mut near, tcp) = connected();
     let browser = std::thread::spawn(move || {
-        let tcp = TcpStream::connect_timeout(&address, Duration::from_secs(5)).expect("connected");
-        tcp.set_read_timeout(Some(Duration::from_secs(5)))
+        near.set_read_timeout(Some(Duration::from_secs(5)))
             .expect("bounded");
         let name = "localhost".try_into().expect("a name");
         let mut connection =
             rustls::ClientConnection::new(Arc::new(client), name).expect("a session");
-        let mut tcp = tcp;
         while connection.is_handshaking() {
-            if connection.complete_io(&mut tcp).is_err() {
+            if connection.complete_io(&mut near).is_err() {
                 break;
             }
         }
     });
-    // bounded: the browser connects on loopback on the thread above, or fails
-    let (tcp, _) = listener.accept().expect("accepted");
     tcp.set_read_timeout(Some(Duration::from_secs(5)))
         .expect("bounded");
     let (_, recorded) = handshaken(tcp, config, bound).expect("handshaken");

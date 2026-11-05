@@ -138,9 +138,9 @@ fn native_roots() -> Result<rustls::RootCertStore> {
 #[cfg(test)]
 mod tests {
     use std::io::{Read, Write};
-    use std::net::TcpListener;
 
     use super::*;
+    use crate::fixture::connected;
     use crate::server::{server, server_config};
 
     #[test]
@@ -175,11 +175,9 @@ mod tests {
         )
         .expect("server config");
         let served = Arc::new(served);
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
-        let address = listener.local_addr().expect("address");
+        let (near, far): (Vec<_>, Vec<_>) = (0..2).map(|_| connected()).unzip();
         let far = std::thread::spawn(move || {
-            for _ in 0..2 {
-                let (tcp, _) = listener.accept().expect("accept");
+            for tcp in far {
                 let mut guarded = server(tcp, Arc::clone(&served)).expect("server");
                 guarded.write_all(b"x").expect("written");
                 guarded.flush().expect("flushed");
@@ -189,9 +187,9 @@ mod tests {
         let mut roots = rustls::RootCertStore::empty();
         roots.add(signed.cert.der().clone()).expect("trusted");
         let kept = Arc::new(configure(roots));
-        let kinds: Vec<_> = (0..2)
-            .map(|_| {
-                let tcp = TcpStream::connect(address).expect("connect");
+        let kinds: Vec<_> = near
+            .into_iter()
+            .map(|tcp| {
                 let mut guarded = client_with("localhost", tcp, Arc::clone(&kept)).expect("tls");
                 let mut byte = [0u8; 1];
                 guarded.read_exact(&mut byte).expect("read");

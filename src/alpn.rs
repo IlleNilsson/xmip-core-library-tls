@@ -48,11 +48,11 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::net::TcpListener;
     use std::sync::Arc;
 
     use super::*;
     use crate::client::{client_with, configure};
+    use crate::fixture::connected;
     use crate::server::{server, server_config};
 
     const H2: &[u8] = b"h2";
@@ -69,17 +69,14 @@ mod tests {
         )
         .expect("server config");
         let config = Arc::new(selecting(config, selected));
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
-        let address = listener.local_addr().expect("address");
         let mut roots = rustls::RootCertStore::empty();
         roots.add(signed.cert.der().clone()).expect("trusted");
         let client = Arc::new(offering(configure(roots), offered));
+        let (calling, tcp) = connected();
         let near = std::thread::spawn(move || {
-            let tcp = TcpStream::connect(address).expect("connect");
-            let mut stream = client_with("localhost", tcp, client).expect("client");
+            let mut stream = client_with("localhost", calling, client).expect("client");
             agreed(&mut stream)
         });
-        let (tcp, _) = listener.accept().expect("accept");
         let mut far = server(tcp, config).expect("server");
         let served = agreed(&mut far);
         let asked = near.join().expect("client thread");

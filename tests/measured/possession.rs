@@ -3,13 +3,14 @@
 //! and recorded, its transcript recovered, beside the same handshake
 //! served plainly; and the node's check of the transcript.
 
-use std::net::{TcpListener, TcpStream};
+use std::net::TcpStream;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use rcgen::{CertificateParams, CertifiedIssuer, ExtendedKeyUsagePurpose, IsCa, KeyPair};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use xmip_core_library_tls::Identity;
+use xmip_core_library_tls::fixture::connected;
 use xmip_core_library_tls::possession::{binding, handshaken, proved, proving};
 
 const ROUNDS: usize = 31;
@@ -51,24 +52,17 @@ fn parties() -> (Identity, Arc<rustls::ClientConfig>) {
 /// One browser's handshake against a server that `serve` answers, and how
 /// long the server took from the connection to its finished handshake.
 fn timed(client: &Arc<rustls::ClientConfig>, serve: &dyn Fn(TcpStream)) -> Duration {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bound");
-    let address = listener.local_addr().expect("address");
+    let (mut near, tcp) = connected();
     let client = Arc::clone(client);
     let browser = std::thread::spawn(move || {
-        let mut tcp =
-            TcpStream::connect_timeout(&address, Duration::from_secs(5)).expect("connected");
-        tcp.set_nodelay(true).expect("no delay");
         let name = "localhost".try_into().expect("a name");
         let mut connection = rustls::ClientConnection::new(client, name).expect("a session");
         while connection.is_handshaking() {
-            if connection.complete_io(&mut tcp).is_err() {
+            if connection.complete_io(&mut near).is_err() {
                 break;
             }
         }
     });
-    // bounded: the browser connects on loopback on the thread above, or fails
-    let (tcp, _) = listener.accept().expect("accepted");
-    tcp.set_nodelay(true).expect("no delay");
     tcp.set_read_timeout(Some(Duration::from_secs(5)))
         .expect("bounded");
     let began = Instant::now();

@@ -184,6 +184,7 @@ pub fn authenticates_servers(der: &[u8]) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
     use std::io::{Read, Write};
 
     use super::*;
@@ -336,13 +337,13 @@ mod tests {
 
         let stranger = stranger(&ours).client().expect("a client");
         let refused = answer_by(Arc::new(stranger), asking()).expect_err("a stranger");
-        assert!(matches!(refused, Unanswered::Refused(_)), "{refused:?}");
+        assert_matches!(refused, Unanswered::Refused(_), "{refused:?}");
         let mut roots = rustls::RootCertStore::empty();
         roots.add(ours.der().clone()).expect("an anchor");
         let watcher = Arc::new(crate::configure(roots));
         let required = answer_by(watcher, server.server().expect("a server"))
             .expect_err("no certificate where one is required");
-        assert!(matches!(required, Unanswered::Refused(_)), "{required:?}");
+        assert_matches!(required, Unanswered::Refused(_), "{required:?}");
     }
 
     /// An identity another authority issued, trusting `ours`, so that only

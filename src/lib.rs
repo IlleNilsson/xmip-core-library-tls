@@ -71,6 +71,7 @@ pub mod fixture;
 mod mutual;
 mod name;
 pub mod peer;
+mod pem;
 pub mod possession;
 mod server;
 mod signer;

@@ -3,7 +3,7 @@
 use std::net::TcpStream;
 use std::sync::Arc;
 
-use crate::{Result, TlsError, provider};
+use crate::{Result, TlsError, pem, provider};
 
 /// A server-side TLS connection, ready to read and write — a Receive
 /// Location's guarded channel. ADR-0033.
@@ -18,17 +18,13 @@ pub type GuardedServer = rustls::StreamOwned<rustls::ServerConnection, TcpStream
 ///
 /// Where the certificate or key cannot be read, or the pair is not usable.
 pub fn server_config(certificate_pem: &[u8], key_pem: &[u8]) -> Result<rustls::ServerConfig> {
-    let certificates = rustls_pemfile::certs(&mut &certificate_pem[..])
-        .collect::<core::result::Result<Vec<_>, _>>()
-        .map_err(|failure| TlsError::new(format!("reading the certificate: {failure}")))?;
+    let certificates = pem::certificates(certificate_pem, "the certificate")?;
 
     if certificates.is_empty() {
         return Err(TlsError::new("the certificate PEM held no certificate"));
     }
 
-    let key = rustls_pemfile::private_key(&mut &key_pem[..])
-        .map_err(|failure| TlsError::new(format!("reading the private key: {failure}")))?
-        .ok_or_else(|| TlsError::new("the key PEM held no private key"))?;
+    let key = pem::private_key(key_pem)?;
 
     rustls::ServerConfig::builder_with_provider(provider())
         .with_protocol_versions(rustls::DEFAULT_VERSIONS)

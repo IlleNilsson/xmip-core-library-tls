@@ -14,7 +14,7 @@ use std::sync::Arc;
 use rustls::sign::{CertifiedKey, SingleCertAndKey};
 
 use crate::signer::{Kept, Sign};
-use crate::{Result, TlsError, configure, provider};
+use crate::{Result, TlsError, configure, pem, provider};
 
 /// What one end presents and what it trusts: its certificate chain and the
 /// key that signs for it — read from PEM, or kept by its platform's keeper
@@ -35,9 +35,7 @@ impl Identity {
     /// do not pair, or an anchor is not a certificate a trust store takes.
     pub fn from_pem(certificate_pem: &[u8], key_pem: &[u8], anchors_pem: &[u8]) -> Result<Self> {
         let certificates = certificates(certificate_pem, "the certificate")?;
-        let key = rustls_pemfile::private_key(&mut &key_pem[..])
-            .map_err(|failure| TlsError::new(format!("reading the private key: {failure}")))?
-            .ok_or_else(|| TlsError::new("the key PEM held no private key"))?;
+        let key = pem::private_key(key_pem)?;
         let presented =
             CertifiedKey::from_der(certificates, key, &provider()).map_err(|failure| {
                 TlsError::new(format!("loading the certificate and key: {failure}"))
@@ -149,7 +147,7 @@ impl Identity {
 }
 
 fn certificates(pem: &[u8], what: &str) -> Result<Vec<rustls::pki_types::CertificateDer<'static>>> {
-    let found = certificates_of(pem, what)?;
+    let found = pem::certificates(pem, what)?;
     if found.is_empty() {
         return Err(TlsError::new(format!("{what} held no certificate")));
     }
@@ -174,21 +172,12 @@ pub fn trusting(anchors_pem: &[u8]) -> Result<rustls::ClientConfig> {
 /// The trust store the certificates `pem` holds make.
 fn anchors(pem: &[u8]) -> Result<rustls::RootCertStore> {
     let mut anchors = rustls::RootCertStore::empty();
-    for anchor in certificates_of(pem, "the trust anchors")? {
+    for anchor in pem::certificates(pem, "the trust anchors")? {
         anchors
             .add(anchor)
             .map_err(|failure| TlsError::new(format!("a trust anchor: {failure}")))?;
     }
     Ok(anchors)
-}
-
-fn certificates_of(
-    pem: &[u8],
-    what: &str,
-) -> Result<Vec<rustls::pki_types::CertificateDer<'static>>> {
-    rustls_pemfile::certs(&mut &pem[..])
-        .collect::<core::result::Result<Vec<_>, _>>()
-        .map_err(|failure| TlsError::new(format!("reading {what}: {failure}")))
 }
 
 #[cfg(test)]
@@ -315,9 +304,7 @@ mod tests {
         let ours = authority();
         let near = issued(&ours, "localhost");
         let far = issued(&ours, "localhost");
-        let der = rustls_pemfile::private_key(&mut near.key.as_bytes())
-            .expect("pem")
-            .expect("a key");
+        let der = pem::private_key(near.key.as_bytes()).expect("a key");
         let key = rustls::crypto::aws_lc_rs::sign::any_ecdsa_type(&der).expect("ECDSA");
 
         let client = kept(&near, Keeper(Some(Arc::clone(&key)))).client();
@@ -332,9 +319,7 @@ mod tests {
             &server
         ));
         let held = issued(&ours, "localhost");
-        let der = rustls_pemfile::private_key(&mut held.key.as_bytes())
-            .expect("pem")
-            .expect("a key");
+        let der = pem::private_key(held.key.as_bytes()).expect("a key");
         let own = rustls::crypto::aws_lc_rs::sign::any_ecdsa_type(&der).expect("ECDSA");
         let server = kept(&held, Keeper(Some(own)));
         assert!(ping(

@@ -15,13 +15,13 @@ path = "src/lib.rs"
 [dependencies]
 # rustls with its default provider, aws-lc-rs, because ring has no ML-KEM and
 # the hybrid key exchange is the point (ADR-0033, amendment 2026-09-22). Its
-# assembler comes prebuilt, so a Windows build needs no NASM.
+# assembler comes prebuilt, so a Windows build needs no NASM. A certificate
+# chain and a private key are read as PEM through the `PemObject` of the
+# rustls-pki-types it brings (`pem`).
 rustls = "0.23"
 # The operating system's trust store rather than a bundled root list: the
 # organizations Xmip is aimed at run their own certificate authorities.
 rustls-native-certs = "0.8"
-# Reading a certificate chain and a private key as PEM.
-rustls-pemfile = "2"
 # A certificate's subject and issuer, which rustls keeps as DER (`name`):
 # what a server that terminates TLS reports of its client (`peer`), and
 # what the identity gates compare a claim with.

@@ -103,14 +103,14 @@ const KEY_EXCHANGE: [&dyn rustls::crypto::SupportedKxGroup; 4] = [
 /// rustls's preference cannot quietly change Xmip's. Built once per process.
 #[must_use]
 pub fn provider() -> Arc<rustls::crypto::CryptoProvider> {
-    static PROVIDER: std::sync::OnceLock<Arc<rustls::crypto::CryptoProvider>> =
-        std::sync::OnceLock::new();
-    Arc::clone(PROVIDER.get_or_init(|| {
-        Arc::new(rustls::crypto::CryptoProvider {
-            kx_groups: KEY_EXCHANGE.to_vec(),
-            ..rustls::crypto::aws_lc_rs::default_provider()
-        })
-    }))
+    static PROVIDER: std::sync::LazyLock<Arc<rustls::crypto::CryptoProvider>> =
+        std::sync::LazyLock::new(|| {
+            Arc::new(rustls::crypto::CryptoProvider {
+                kx_groups: KEY_EXCHANGE.to_vec(),
+                ..rustls::crypto::aws_lc_rs::default_provider()
+            })
+        });
+    Arc::clone(&PROVIDER)
 }
 
 /// Why a connection could not be guarded.

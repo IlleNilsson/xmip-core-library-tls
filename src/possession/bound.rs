@@ -20,7 +20,7 @@
 //! draws otherwise, the node finds no binding and refuses relay in words.
 
 use std::cell::Cell;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, LazyLock};
 
 use rustls::crypto::{CryptoProvider, GetRandomFailed, SecureRandom};
 
@@ -53,13 +53,13 @@ static BOUND: Bound = Bound;
 /// The provider a proving server is built from: the general one, its
 /// random source [`Bound`].
 pub(crate) fn provider() -> Arc<CryptoProvider> {
-    static PROVIDER: OnceLock<Arc<CryptoProvider>> = OnceLock::new();
-    Arc::clone(PROVIDER.get_or_init(|| {
+    static PROVIDER: LazyLock<Arc<CryptoProvider>> = LazyLock::new(|| {
         Arc::new(CryptoProvider {
             secure_random: &BOUND,
             ..(*crate::provider()).clone()
         })
-    }))
+    });
+    Arc::clone(&PROVIDER)
 }
 
 /// What `nonces` bind the random to: SHA-256 over each, its length before

@@ -206,6 +206,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
     use std::time::Duration;
 
     use super::*;
@@ -243,10 +244,7 @@ mod tests {
             .expect("timeout");
         let mut one = [0u8; 3];
         let waited = near_reading.read(&mut one).expect_err("nothing came");
-        assert!(matches!(
-            waited.kind(),
-            ErrorKind::WouldBlock | ErrorKind::TimedOut
-        ));
+        assert_matches!(waited.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut);
 
         far_writing.write_all(b"one").expect("written");
         near_reading

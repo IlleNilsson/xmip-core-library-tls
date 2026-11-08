@@ -1,9 +1,10 @@
 //! The possession proof made and checked over loopback: a browser's
 //! handshake over TLS 1.3, over 1.3 retried, and over 1.2, each recorded
 //! with the random bound and its transcript proved — the `ServerHello`'s
-//! random holding the binding, which pins the order in which rustls 0.23.45
-//! draws its randoms — and a transcript that is not the handshake's, or a
-//! handshake with no certificate, proving nothing.
+//! random holding the binding, which pins the order in which rustls 0.23.46
+//! draws its randoms — a transcript that is not the handshake's, or a
+//! handshake with no certificate, proving nothing, and a handshake that
+//! panics leaving its thread disarmed.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -20,7 +21,9 @@ use crate::{Identity, Result};
 struct Parties {
     server: Identity,
     server_leaf: Vec<u8>,
+    server_chain: String,
     authority: CertificateDer<'static>,
+    authority_pem: String,
     client: (CertificateDer<'static>, Vec<u8>),
 }
 
@@ -47,7 +50,9 @@ fn parties() -> Parties {
     Parties {
         server: identity,
         server_leaf: server.der().to_vec(),
+        server_chain: server.pem(),
         authority: authority.der().clone(),
+        authority_pem: authority.pem(),
         client: (client.der().clone(), client_key.serialize_der()),
     }
 }
@@ -138,6 +143,43 @@ fn every_version_binds_the_random_and_the_browsers_key_is_proven_to_hold_it() {
         tampered[12] ^= 1;
         assert!(proved(&tampered).is_err());
     }
+}
+
+/// A keeper that panics when the handshake asks it to sign.
+struct Panicking;
+
+impl crate::Sign for Panicking {
+    fn sign(&self, _message: &[u8]) -> Result<Vec<u8>> {
+        panic!("a keeper that panics in the middle of a handshake");
+    }
+}
+
+#[test]
+fn a_panic_inside_a_recorded_handshake_leaves_the_thread_disarmed() {
+    use rustls::crypto::aws_lc_rs::kx_group::X25519;
+    let mut parties = parties();
+    parties.server = Identity::from_signer(
+        parties.server_chain.as_bytes(),
+        Arc::new(Panicking),
+        parties.authority_pem.as_bytes(),
+    )
+    .expect("a server whose keeper panics");
+    let bound = binding(&[b"a nonce"]);
+    let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        handshake(&parties, TLS13, &[X25519], true, bound)
+    }));
+    assert!(unwound.is_err(), "the keeper panicked inside the handshake");
+    assert!(!super::recorded::armed(), "disarmed and its secrets taken");
+    let mut random = [0u8; 32];
+    super::bound::provider()
+        .secure_random
+        .fill(&mut random)
+        .expect("drawn");
+    assert_ne!(
+        random[..super::BINDING],
+        bound,
+        "a draw after is the system's"
+    );
 }
 
 #[test]

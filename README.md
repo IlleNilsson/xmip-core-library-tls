@@ -46,9 +46,13 @@ identity, a client's certificate asked for, no session resumed — a resumed
 session signs nothing — and a random source that, on a thread a handshake
 is armed on, writes `possession::binding` of the nodes' fresh nonces into
 the first 24 bytes of every 32-byte random it draws, the `ServerHello`'s
-among them (rustls 0.23.45 draws one for a `HelloRetryRequest` and another
+among them (rustls 0.23.46 draws one for a `HelloRetryRequest` and another
 for the `ServerHello`, and TLS 1.2 a session ID after it; the last 8 bytes
-stay random, TLS 1.2's downgrade sentinel there). `possession::handshaken`
+stay random, TLS 1.2's downgrade sentinel there). `Cargo.toml` pins that
+rustls exactly, because the binding holds only for the draw order the tests
+pin; the pin moves with those tests. The thread is armed by a guard that
+disarms it and zeroes the handshake's secrets on every way out, a panic's
+unwind included, so a binding never reaches a later draw. `possession::handshaken`
 makes the handshake over a recording of the socket, and its
 `Recorded::transcript` recovers the transcript after, apart from the
 handshake — the handshake messages from the ClientHello through the
@@ -72,6 +76,23 @@ one, who only watches. A web host's HTTPS is this, through the runtime's
 `xmip_operate.h` section 21 (ADR-0009, amendment 2026-10-21);
 `Identity::server` refuses a client without a certificate, as everything
 between Xmip's own parts does.
+
+**A revoked client is refused** (`Revocation`, `Identity::revoking`). A
+server given its authority's revocation lists refuses a client whose
+certificate a list revokes, and one whose issuer published no list it holds;
+every certificate on the path below the anchor is checked. The lists are
+read from the file the authority keeps (`Revocation::from_file`, the
+register's `authority.crl`, DER or PEM) or handed over
+(`Revocation::from_lists`, changed by `replace`). Every handshake that
+verifies a client looks at the file's metadata and reads the file again
+only where it changed, so a revocation counts from the next handshake on;
+nothing watches it, and a file gone or unreadable refuses the client. A
+list past its nextUpdate refuses every client it would decide unless the
+configuration says otherwise (`accepting_expired`). Every mutual-TLS
+listener between Xmip's own parts is given its authority's lists; tests
+refuse a revoked client and let its neighbor through, refuse every client
+on an expired list and accept it where configured, and read a list written
+anew at the next handshake.
 
 **A key it cannot read.** `Identity::from_pem` presents a chain with its PEM
 key; `Identity::from_signer` presents a chain whose key its platform's

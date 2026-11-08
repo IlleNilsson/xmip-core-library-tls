@@ -8,9 +8,10 @@
 //! records the handshake ([`handshaken`], over [`proving`]'s configuration),
 //! recovers its transcript ([`Recorded::transcript`]) and hands each node
 //! the transcript, and the node checks that the client's
-//! `CertificateVerify` signs it with its certificate's key ([`proved`]) — so the holder of that key made this handshake after the
-//! node's nonce was issued, to the server whose certificate the transcript
-//! names. TLS 1.3 and 1.2 are both held; a resumed session carries no
+//! `CertificateVerify` signs it with its certificate's key ([`proved`]) —
+//! so the holder of that key made this handshake after the node's nonce
+//! was issued, to the server whose certificate the transcript names. TLS
+//! 1.3 and 1.2 are both held; a resumed session carries no
 //! `CertificateVerify` and proves nothing, so a proving server resumes none.
 //! The handshake secrets TLS 1.3 needs to read its own transcript stay in
 //! this module, for one handshake, and are zeroed after.

@@ -125,6 +125,43 @@ impl Recorded {
     }
 }
 
+/// One handshake on this thread: its random armed and its secrets kept
+/// while this lives. Dropped — ended, or unwinding from a panic in the
+/// handshake — the thread is disarmed and the secrets it kept are taken
+/// and zeroed, so nothing of one handshake reaches the next on the thread.
+struct Handshaking {
+    _armed: bound::Armed,
+}
+
+impl Handshaking {
+    fn begin(binding: [u8; BINDING]) -> Self {
+        SECRETS.set(Some(Secrets::default()));
+        Self {
+            _armed: bound::Armed::arm(binding),
+        }
+    }
+
+    /// The secrets kept, zeroed when the record holding them is dropped;
+    /// the thread disarmed as this returns.
+    fn end(self) -> Secrets {
+        let secrets = SECRETS.take().unwrap_or_default();
+        drop(self);
+        secrets
+    }
+}
+
+impl Drop for Handshaking {
+    fn drop(&mut self) {
+        drop(SECRETS.take());
+    }
+}
+
+/// Whether this thread holds a handshake's secrets or an armed random.
+#[cfg(test)]
+pub(super) fn armed() -> bool {
+    SECRETS.with_borrow(Option::is_some) || bound::armed()
+}
+
 /// Serve `tcp` over `config` ([`proving`]) and finish its handshake, its
 /// random bound to `binding`: the session, and the handshake recorded.
 ///
@@ -141,8 +178,7 @@ pub fn handshaken(
             "starting the server tls session: {failure}"
         )))
     })?;
-    SECRETS.set(Some(Secrets::default()));
-    bound::arm(binding);
+    let handshaking = Handshaking::begin(binding);
     let mut recording = Recording {
         socket: &mut tcp,
         read: Vec::new(),
@@ -150,10 +186,7 @@ pub fn handshaken(
     };
     let done = completed(&mut connection, &mut recording);
     let Recording { read, written, .. } = recording;
-    bound::disarm();
-    // Taken, and so zeroed when this returns or the record is dropped,
-    // whatever the handshake did.
-    let secrets = SECRETS.take().unwrap_or_default();
+    let secrets = handshaking.end();
     done?;
     let recorded = Recorded {
         read,

@@ -32,7 +32,11 @@
 //! 2026-10-01). An end whose key never leaves its platform's keeper — a
 //! phone's operator key in the Android Keystore or the Secure Enclave —
 //! presents its chain with a [`Sign`] in place of the key, and the keeper
-//! signs each handshake (ADR-0034, amendment 2026-10-15).
+//! signs each handshake (ADR-0034, amendment 2026-10-15). A server given
+//! its authority's revocation lists ([`Identity::revoking`], [`Revocation`])
+//! refuses a client revoked, and every client once a list has expired,
+//! unless configuration accepts that; a list kept in a file is read again
+//! as it changes.
 //!
 //! **Who the client is, before its content.** [`peer::answered`] finishes
 //! a server's handshake and reads the certificate its client presented —
@@ -73,6 +77,7 @@ mod name;
 pub mod peer;
 mod pem;
 pub mod possession;
+mod revocation;
 mod server;
 mod signer;
 
@@ -80,6 +85,7 @@ pub use client::{Guarded, client, client_offering, client_with, configure};
 pub use mutual::{Identity, trusting};
 pub use name::Name;
 pub use peer::Peer;
+pub use revocation::Revocation;
 /// The two configurations a connection is guarded by, named here so a
 /// caller that keeps one names this library's and no TLS stack of its own.
 pub use rustls::{ClientConfig, ServerConfig};

@@ -18,7 +18,13 @@ path = "src/lib.rs"
 # assembler comes prebuilt, so a Windows build needs no NASM. A certificate
 # chain and a private key are read as PEM through the `PemObject` of the
 # rustls-pki-types it brings (`pem`).
-rustls = "0.23"
+#
+# Pinned exactly: the possession proof writes its binding into every 32-byte
+# random rustls draws on an armed thread (`possession::bound`), which holds
+# only while rustls draws the ServerHello's random, and nothing else of that
+# size, in the order the tests pin. A release may draw otherwise, so the pin
+# moves only with `possession::tests` passing on the new version.
+rustls = "=0.23.46"
 # The operating system's trust store rather than a bundled root list: the
 # organizations Xmip is aimed at run their own certificate authorities.
 rustls-native-certs = "0.8"

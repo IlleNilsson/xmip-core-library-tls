@@ -7,23 +7,27 @@
 //! amendment 2026-10-01: *Xmip encrypts to Xmip Node with Role/Type
 //! Storage*). The anchors are the ones a node's own provisioning gave it
 //! (ADR-0034), never the operating system's trust store: a peer is one of
-//! the cluster's own nodes, not anyone a public authority vouches for.
+//! the cluster's own nodes, not anyone a public authority vouches for. A
+//! server given the authority's revocation lists ([`Identity::revoking`])
+//! refuses a client its authority revoked.
 
 use std::sync::Arc;
 
 use rustls::sign::{CertifiedKey, SingleCertAndKey};
 
+use crate::revocation::{self, Revocation};
 use crate::signer::{Kept, Sign};
 use crate::{Result, TlsError, configure, pem, provider};
 
 /// What one end presents and what it trusts: its certificate chain and the
 /// key that signs for it — read from PEM, or kept by its platform's keeper
-/// and asked for each signature ([`Sign`]) — and the anchors a peer's chain
-/// must reach.
+/// and asked for each signature ([`Sign`]) — the anchors a peer's chain
+/// must reach, and, for a server, the lists a client's is refused by.
 #[derive(Clone)]
 pub struct Identity {
     presented: Arc<CertifiedKey>,
     anchors: Arc<rustls::RootCertStore>,
+    revocation: Option<Arc<Revocation>>,
 }
 
 impl Identity {
@@ -43,6 +47,7 @@ impl Identity {
         Ok(Self {
             presented: Arc::new(presented),
             anchors: Arc::new(anchors(anchors_pem)?),
+            revocation: None,
         })
     }
 
@@ -65,7 +70,20 @@ impl Identity {
         Ok(Self {
             presented: Arc::new(CertifiedKey::new(certificates, Arc::new(Kept(signer)))),
             anchors: Arc::new(anchors(anchors_pem)?),
+            revocation: None,
         })
+    }
+
+    /// A server of this identity refuses a client whose certificate a list
+    /// `revocation` holds revokes, one no list held covers, and every client
+    /// once a list is past its nextUpdate, unless it accepts that
+    /// ([`Revocation::accepting_expired`]); the lists are read again as
+    /// they change. Every mutual-TLS listener between Xmip's own parts is
+    /// given its authority's.
+    #[must_use]
+    pub fn revoking(mut self, revocation: Arc<Revocation>) -> Self {
+        self.revocation = Some(revocation);
+        self
     }
 
     /// The server side: presents this identity, and refuses a client that
@@ -73,7 +91,7 @@ impl Identity {
     ///
     /// # Errors
     ///
-    /// Where the anchors are empty.
+    /// Where the anchors are empty, or a revocation list does not read.
     pub fn server(&self) -> Result<rustls::ServerConfig> {
         self.served(false)
     }
@@ -87,7 +105,7 @@ impl Identity {
     ///
     /// # Errors
     ///
-    /// Where the anchors are empty.
+    /// Where the anchors are empty, or a revocation list does not read.
     pub fn server_asking(&self) -> Result<rustls::ServerConfig> {
         self.served(true)
     }
@@ -105,18 +123,8 @@ impl Identity {
         asking: bool,
         provider: Arc<rustls::crypto::CryptoProvider>,
     ) -> Result<rustls::ServerConfig> {
-        let builder = rustls::server::WebPkiClientVerifier::builder_with_provider(
-            Arc::clone(&self.anchors),
-            Arc::clone(&provider),
-        );
-        let builder = if asking {
-            builder.allow_unauthenticated()
-        } else {
-            builder
-        };
-        let verifier = builder
-            .build()
-            .map_err(|failure| TlsError::new(format!("the client verifier: {failure}")))?;
+        let verifier =
+            revocation::verifier(&self.anchors, &provider, asking, self.revocation.as_ref())?;
         Ok(rustls::ServerConfig::builder_with_provider(provider)
             .with_protocol_versions(rustls::DEFAULT_VERSIONS)
             .unwrap_or_else(|_| unreachable!("the default versions are always supported"))

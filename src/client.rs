@@ -66,6 +66,26 @@ pub fn client_with(
     Ok(rustls::StreamOwned::new(connection, tcp))
 }
 
+/// Wrap a connection in TLS for one host, against `trust` where the
+/// configuration gives a trust store — a Party's own certificate authority,
+/// a directory's or an authorization server's — and the operating system's
+/// where it gives none: [`client_with`] or [`client`]. The one choice every
+/// protocol with an optional trust store makes, made here once.
+///
+/// # Errors
+///
+/// As [`client`]; with `trust` given, as [`client_with`].
+pub fn client_trusting(
+    host: &str,
+    tcp: TcpStream,
+    trust: Option<&Arc<rustls::ClientConfig>>,
+) -> Result<Guarded> {
+    match trust {
+        Some(config) => client_with(host, tcp, Arc::clone(config)),
+        None => client(host, tcp),
+    }
+}
+
 /// A client configuration over `roots`, with this node's key exchange and
 /// a session cache to resume from.
 #[must_use]
@@ -205,6 +225,57 @@ mod tests {
                 Some(rustls::HandshakeKind::Full),
                 Some(rustls::HandshakeKind::Resumed)
             ]
+        );
+    }
+
+    #[test]
+    fn a_given_trust_store_is_trusted_and_without_one_the_systems_is() {
+        let signed = rcgen::generate_simple_self_signed(vec!["localhost".to_string()])
+            .expect("a certificate");
+        let served = Arc::new(
+            server_config(
+                signed.cert.pem().as_bytes(),
+                signed.signing_key.serialize_pem().as_bytes(),
+            )
+            .expect("server config"),
+        );
+        let (near, far): (Vec<_>, Vec<_>) = (0..2).map(|_| connected()).unzip();
+        let far = std::thread::spawn(move || {
+            for tcp in far {
+                let mut guarded = server(tcp, Arc::clone(&served)).expect("server");
+                if guarded
+                    .write_all(b"x")
+                    .and_then(|()| guarded.flush())
+                    .is_ok()
+                {
+                    let _ = guarded.read(&mut [0u8; 1]);
+                }
+            }
+        });
+        let mut roots = rustls::RootCertStore::empty();
+        roots.add(signed.cert.der().clone()).expect("trusted");
+        let given = Arc::new(configure(roots));
+        let mut near = near.into_iter();
+        let mut byte = [0u8; 1];
+
+        let mut trusted =
+            client_trusting("localhost", near.next().expect("one"), Some(&given)).expect("tls");
+        trusted
+            .read_exact(&mut byte)
+            .expect("the given store trusts the server");
+        trusted.write_all(b"y").expect("written");
+        trusted.flush().expect("flushed");
+        drop(trusted);
+        // The operating system's store does not hold a self-signed
+        // certificate made a moment ago: refused at the handshake, or before
+        // it on a machine without a store.
+        let refused = client_trusting("localhost", near.next().expect("two"), None)
+            .map_or(true, |mut system| system.read_exact(&mut byte).is_err());
+        far.join().expect("far end");
+
+        assert!(
+            refused,
+            "the system's store does not trust a self-signed server"
         );
     }
 }

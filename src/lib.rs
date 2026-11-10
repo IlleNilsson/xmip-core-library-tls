@@ -81,7 +81,7 @@ mod revocation;
 mod server;
 mod signer;
 
-pub use client::{Guarded, client, client_offering, client_with, configure};
+pub use client::{Guarded, client, client_offering, client_trusting, client_with, configure};
 pub use mutual::{Identity, trusting};
 pub use name::Name;
 pub use peer::Peer;

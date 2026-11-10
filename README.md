@@ -119,6 +119,9 @@ first agreed rather than repeating the full handshake — a test holds the
 second handshake to `Resumed`. Until 2026-09-27 every connection read the
 store and built its own configuration, and resumed nothing. A caller with
 its own trust store (`client_with`) keeps its configuration the same way.
+A protocol whose trust store is optional calls `client_trusting`: the
+configured store where one is given, the operating system's otherwise, a
+choice made here once and not in each transport.
 
 Until 2026-09-23 TLS sat inside `xmip-core-transport-http`, so the transports
 riding on HTTP could reach it and the twenty that do not — SMTP and IMAP with

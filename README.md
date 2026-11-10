@@ -128,4 +128,4 @@ riding on HTTP could reach it and the twenty that do not — SMTP and IMAP with
 STARTTLS, MQTT, AMQP, Kafka, the databases, syslog — could not; four mapped
 their `https` URLs to a stack they had no way to load.
 
-`architecture.xmip` carries the maturity.
+`architecture.toml` carries the maturity.

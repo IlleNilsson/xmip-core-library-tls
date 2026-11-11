@@ -2,6 +2,7 @@
 //! written once (`test-support`; `doc/governance/rust-style.md` section
 //! 5c): never a production build.
 
+use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
 use std::time::Duration;
@@ -46,10 +47,50 @@ pub fn connected() -> (TcpStream, TcpStream) {
     (near, far)
 }
 
+/// How `client` made each of `connections` handshakes with `server`, one
+/// after another over loopback ([`connected`]), full or resumed, as the
+/// client saw it. The client reads a byte the server writes after its
+/// handshake, so whatever the server sent before it — a session ticket —
+/// has reached the client before the next connection starts.
+///
+/// # Panics
+///
+/// When the loopback connection or a handshake fails: a test's
+/// connection, failing it.
+#[must_use]
+pub fn handshakes(
+    client: &Arc<rustls::ClientConfig>,
+    server: &Arc<rustls::ServerConfig>,
+    connections: usize,
+) -> Vec<Option<rustls::HandshakeKind>> {
+    let (near, far): (Vec<_>, Vec<_>) = (0..connections).map(|_| connected()).unzip();
+    let answering = Arc::clone(server);
+    let far = std::thread::spawn(move || {
+        for tcp in far {
+            let mut guarded = crate::server(tcp, Arc::clone(&answering)).expect("server");
+            guarded.write_all(b"x").expect("written");
+            guarded.flush().expect("flushed");
+            let _ = guarded.read(&mut [0u8; 1]);
+        }
+    });
+    let kinds = near
+        .into_iter()
+        .map(|tcp| {
+            let mut guarded = client_with("localhost", tcp, Arc::clone(client)).expect("tls");
+            guarded.read_exact(&mut [0u8; 1]).expect("read");
+            guarded.write_all(b"y").expect("written");
+            guarded.flush().expect("flushed");
+            guarded.conn.handshake_kind()
+        })
+        .collect();
+    far.join().expect("far end");
+    kinds
+}
+
 /// A client and a server, split, over loopback ([`connected`]): with
-/// Nagle's algorithm on, a record written after the server's tickets
-/// waited for the client's delayed acknowledgement, forty milliseconds on
-/// Linux, past the test's ten (2026-10-21).
+/// Nagle's algorithm on, a record written while the server's last one was
+/// unacknowledged waited for the client's delayed acknowledgement, forty
+/// milliseconds on Linux, past the test's ten (2026-10-21).
 ///
 /// # Panics
 ///

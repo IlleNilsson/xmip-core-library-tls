@@ -1,25 +1,21 @@
 //! The near side: a connection this node opens, or upgrades in place.
 //!
-//! **Loaded once, resumed after.** The operating system's trust store is
-//! read the first time a connection needs it, and a configuration over it
-//! is built once for each list of protocols offered; every connection
-//! after the first shares both. The configuration keeps rustls's session
-//! cache, so a second connection to a server resumes the session the first
-//! agreed instead of repeating the whole handshake. Until 2026-09-27 every
-//! connection read the store and built a configuration of its own, and so
-//! resumed nothing.
+//! **Loaded once.** The operating system's trust store is read the first
+//! time a connection needs it, and a configuration over it is built once
+//! for each list of protocols offered; every connection after the first
+//! shares both. Until 2026-09-27 every connection read the store and built
+//! a configuration of its own. No configuration resumes a session
+//! (`configuration`): every connection checks the server's certificate in
+//! a full handshake, but a data connection of one login
+//! ([`login_trusting`]), which resumes its control connection's.
 
 use std::net::TcpStream;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use crate::{Result, TlsError, provider};
+use crate::{Result, TlsError, configuration};
 
 /// A client-side TLS connection, ready to read and write.
 pub type Guarded = rustls::StreamOwned<rustls::ClientConnection, TcpStream>;
-
-/// How many sessions a client configuration remembers for resumption: one
-/// per server a node speaks to, with room.
-const SESSIONS: usize = 256;
 
 /// Wrap a connection in TLS for one host, against the operating system's
 /// trust store.
@@ -48,7 +44,7 @@ pub fn client_offering(host: &str, tcp: TcpStream, protocols: &[&[u8]]) -> Resul
 
 /// As [`client`], against a trust store the caller holds — a Party's own
 /// certificate authority, or a test's. The caller keeps `config` for the
-/// next connection, as [`client`] keeps its own, so sessions resume.
+/// next connection, as [`client`] keeps its own, so it is built once.
 ///
 /// # Errors
 ///
@@ -80,23 +76,42 @@ pub fn client_trusting(
     tcp: TcpStream,
     trust: Option<&Arc<rustls::ClientConfig>>,
 ) -> Result<Guarded> {
-    match trust {
-        Some(config) => client_with(host, tcp, Arc::clone(config)),
-        None => client(host, tcp),
-    }
+    client_with(host, tcp, trusted(trust)?)
 }
 
-/// A client configuration over `roots`, with this node's key exchange and
-/// a session cache to resume from.
+/// A client configuration over `roots`, with this node's key exchange,
+/// presenting no certificate and resuming no session.
 #[must_use]
 pub fn configure(roots: impl Into<Arc<rustls::RootCertStore>>) -> rustls::ClientConfig {
-    let mut config = rustls::ClientConfig::builder_with_provider(provider())
-        .with_protocol_versions(rustls::DEFAULT_VERSIONS)
-        .unwrap_or_else(|_| unreachable!("the default versions are always supported"))
-        .with_root_certificates(roots)
-        .with_no_client_auth();
-    config.resumption = rustls::client::Resumption::in_memory_sessions(SESSIONS);
-    config
+    configuration::client(roots, None)
+}
+
+/// A client configuration for one login — a control connection and the
+/// data connections opened beside it, as FTPS's (RFC 4217) — trusting as
+/// [`client_trusting`] does: `trust` where it is given, the operating
+/// system's store where it is not. The login's own connections resume its
+/// first session and no other connection does (`configuration`). Built
+/// once per login, used for each of its connections, and dropped with it.
+///
+/// # Errors
+///
+/// Without `trust`, where the operating system's trust store is empty or
+/// unreadable.
+pub fn login_trusting(
+    trust: Option<&Arc<rustls::ClientConfig>>,
+) -> Result<Arc<rustls::ClientConfig>> {
+    let trusting = trusted(trust)?;
+    Ok(Arc::new(configuration::login(&trusting)))
+}
+
+/// `trust` where the configuration gives a trust store, and the operating
+/// system's, offering no protocol, where it gives none: the one choice
+/// [`client_trusting`] and [`login_trusting`] make.
+fn trusted(trust: Option<&Arc<rustls::ClientConfig>>) -> Result<Arc<rustls::ClientConfig>> {
+    match trust {
+        Some(config) => Ok(Arc::clone(config)),
+        None => native(&[]),
+    }
 }
 
 /// What this process has built over the operating system's trust store:
@@ -160,7 +175,7 @@ mod tests {
     use std::io::{Read, Write};
 
     use super::*;
-    use crate::fixture::connected;
+    use crate::fixture::{connected, handshakes};
     use crate::server::{server, server_config};
 
     #[test]
@@ -186,46 +201,24 @@ mod tests {
     }
 
     #[test]
-    fn a_second_connection_on_a_kept_configuration_resumes_the_first_session() {
+    fn a_kept_configuration_resumes_nothing_from_a_server_that_offers_it() {
         let signed = rcgen::generate_simple_self_signed(vec!["localhost".to_string()])
             .expect("a certificate");
-        let served = server_config(
-            signed.cert.pem().as_bytes(),
-            signed.signing_key.serialize_pem().as_bytes(),
-        )
-        .expect("server config");
-        let served = Arc::new(served);
-        let (near, far): (Vec<_>, Vec<_>) = (0..2).map(|_| connected()).unzip();
-        let far = std::thread::spawn(move || {
-            for tcp in far {
-                let mut guarded = server(tcp, Arc::clone(&served)).expect("server");
-                guarded.write_all(b"x").expect("written");
-                guarded.flush().expect("flushed");
-                let _ = guarded.read(&mut [0u8; 1]);
-            }
-        });
+        let key =
+            crate::pem::private_key(signed.signing_key.serialize_pem().as_bytes()).expect("a key");
+        // A server of rustls's defaults: a session cache, and tickets sent.
+        let resuming = rustls::ServerConfig::builder_with_provider(crate::provider())
+            .with_protocol_versions(rustls::DEFAULT_VERSIONS)
+            .expect("versions")
+            .with_no_client_auth()
+            .with_single_cert(vec![signed.cert.der().clone()], key)
+            .expect("server config");
         let mut roots = rustls::RootCertStore::empty();
         roots.add(signed.cert.der().clone()).expect("trusted");
         let kept = Arc::new(configure(roots));
-        let kinds: Vec<_> = near
-            .into_iter()
-            .map(|tcp| {
-                let mut guarded = client_with("localhost", tcp, Arc::clone(&kept)).expect("tls");
-                let mut byte = [0u8; 1];
-                guarded.read_exact(&mut byte).expect("read");
-                guarded.write_all(b"y").expect("written");
-                guarded.flush().expect("flushed");
-                guarded.conn.handshake_kind()
-            })
-            .collect();
-        far.join().expect("far end");
-        assert_eq!(
-            kinds,
-            [
-                Some(rustls::HandshakeKind::Full),
-                Some(rustls::HandshakeKind::Resumed)
-            ]
-        );
+
+        let full = Some(rustls::HandshakeKind::Full);
+        assert_eq!(handshakes(&kept, &Arc::new(resuming), 2), [full, full]);
     }
 
     #[test]

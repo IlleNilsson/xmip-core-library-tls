@@ -10,7 +10,8 @@
 //! the young lattice scheme still leaves X25519, and a recording kept for a
 //! quantum computer still faces ML-KEM. A peer that knows only classical
 //! groups is served with X25519, so nothing that connects today stops
-//! connecting, and [`Guarded::key_exchange`] says which was agreed.
+//! connecting, and a connection's `negotiated_key_exchange_group` says
+//! which was agreed.
 //! ADR-0033, amended 2026-09-22.
 //!
 //! **Where this lives and why.** TLS was inside `xmip-core-transport-http`
@@ -37,6 +38,15 @@
 //! refuses a client revoked, and every client once a list has expired,
 //! unless configuration accepts that; a list kept in a file is read again
 //! as it changes.
+//!
+//! **No session is resumed.** rustls resumes one without calling the
+//! verifier, so a peer admitted once went on being admitted after its
+//! certificate was revoked, expired or its anchor taken away. Every server
+//! and client configuration here is built in one place, which stores,
+//! sends and keeps no session, and every handshake is a full one that
+//! verifies the peer's certificate as it stands (ADR-0033, amendment
+//! 2026-11-10). One login's data connections alone resume its control
+//! connection's session ([`login_trusting`]), as FTPS servers may insist.
 //!
 //! **Who the client is, before its content.** [`peer::answered`] finishes
 //! a server's handshake and reads the certificate its client presented —
@@ -69,6 +79,7 @@
 
 pub mod alpn;
 mod client;
+mod configuration;
 pub mod duplex;
 #[cfg(any(test, feature = "test-support"))]
 pub mod fixture;
@@ -81,7 +92,9 @@ mod revocation;
 mod server;
 mod signer;
 
-pub use client::{Guarded, client, client_offering, client_trusting, client_with, configure};
+pub use client::{
+    Guarded, client, client_offering, client_trusting, client_with, configure, login_trusting,
+};
 pub use mutual::{Identity, trusting};
 pub use name::Name;
 pub use peer::Peer;

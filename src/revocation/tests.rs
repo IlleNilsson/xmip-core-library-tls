@@ -1,7 +1,8 @@
 //! Revocation attacked over loopback: a revoked client refused and its
 //! neighbor let through, an expired list refusing every client unless
-//! accepted, a list written anew read at the next handshake, and a list
-//! gone refusing rather than letting anyone through.
+//! accepted, a list written anew read at the next handshake, a client
+//! revoked after its first handshake refused at its next rather than let
+//! resume, and a list gone refusing rather than letting anyone through.
 
 use std::assert_matches;
 use std::io::{Read, Write};
@@ -67,7 +68,10 @@ fn list(authority: &Authority, serials: &[u64], from: i32, until: i32) -> String
 }
 
 /// A server of `authority` refusing by `revocation`.
-fn server(authority: &Authority, revocation: Revocation) -> Arc<rustls::ServerConfig> {
+fn server(
+    authority: &Authority,
+    revocation: impl Into<Arc<Revocation>>,
+) -> Arc<rustls::ServerConfig> {
     let (certificate, key) = leaf(authority, 1, ExtendedKeyUsagePurpose::ServerAuth);
     let identity = Identity::from_pem(
         certificate.as_bytes(),
@@ -75,17 +79,13 @@ fn server(authority: &Authority, revocation: Revocation) -> Arc<rustls::ServerCo
         authority.pem().as_bytes(),
     )
     .expect("identity")
-    .revoking(Arc::new(revocation));
+    .revoking(revocation.into());
     Arc::new(identity.server().expect("a server"))
 }
 
-/// The handshake a client of `authority`, serial `serial`, makes with
-/// `server`: answered, or why not.
-fn answer(
-    authority: &Authority,
-    serial: u64,
-    server: &Arc<rustls::ServerConfig>,
-) -> Result<(), Unanswered> {
+/// A client of `authority`, serial `serial`: its configuration, kept for
+/// every connection it makes, as a node keeps its own.
+fn client(authority: &Authority, serial: u64) -> Arc<rustls::ClientConfig> {
     let (certificate, key) = leaf(authority, serial, ExtendedKeyUsagePurpose::ClientAuth);
     let client = Identity::from_pem(
         certificate.as_bytes(),
@@ -95,13 +95,33 @@ fn answer(
     .expect("identity")
     .client()
     .expect("a client");
+    Arc::new(client)
+}
+
+/// The handshake a client of `authority`, serial `serial`, makes with
+/// `server`: answered, or why not.
+fn answer(
+    authority: &Authority,
+    serial: u64,
+    server: &Arc<rustls::ServerConfig>,
+) -> Result<(), Unanswered> {
+    answer_by(&client(authority, serial), server).map(|_| ())
+}
+
+/// The handshake `client` makes with `server`: answered, saying how —
+/// full or resumed — or why not.
+fn answer_by(
+    client: &Arc<rustls::ClientConfig>,
+    server: &Arc<rustls::ServerConfig>,
+) -> Result<Option<rustls::HandshakeKind>, Unanswered> {
+    let client = Arc::clone(client);
     let (near, far) = connected();
     near.set_read_timeout(Some(Duration::from_secs(5)))
         .expect("bounded");
     far.set_read_timeout(Some(Duration::from_secs(5)))
         .expect("bounded");
     let calling = std::thread::spawn(move || {
-        let mut stream = client_with("localhost", near, Arc::new(client)).expect("a client");
+        let mut stream = client_with("localhost", near, client).expect("a client");
         let _ = stream.write_all(b"order");
         // Ended as TLS ends a stream and read to the server's close, as
         // `peer`'s tests do: Windows loses what a reset socket left unread.
@@ -111,9 +131,39 @@ fn answer(
     });
     let answered = handshaken(far, Arc::clone(server)).map(|mut guarded| {
         let _ = guarded.read_to_end(&mut Vec::new());
+        guarded.conn.handshake_kind()
     });
     calling.join().expect("the client");
     answered
+}
+
+/// rustls resumes a session without calling the client verifier: it copies
+/// the chain the session stored. A client admitted once would go on being
+/// admitted after its authority revoked it, for as long as it resumed; no
+/// session is resumed, so every handshake checks the lists as they stand.
+#[test]
+fn a_client_admitted_once_is_checked_again_at_its_next_handshake_and_refused_once_revoked() {
+    let ours = authority();
+    let held =
+        Arc::new(Revocation::from_lists(list(&ours, &[], 2000, 2100).as_bytes()).expect("lists"));
+    let server = server(&ours, Arc::clone(&held));
+    let kept = client(&ours, 11);
+    let first = answer_by(&kept, &server).expect("not revoked yet");
+    assert_eq!(first, Some(rustls::HandshakeKind::Full));
+
+    held.replace(list(&ours, &[11], 2000, 2100).as_bytes())
+        .expect("revoked since");
+    let again = answer_by(&kept, &server);
+    assert_matches!(
+        again,
+        Err(Unanswered::Refused(_)),
+        "a revoked client was let in again: {again:?}"
+    );
+    let again = format!("{again:?}");
+    assert!(
+        again.contains("Revoked"),
+        "refused, but not as revoked: {again}"
+    );
 }
 
 #[test]

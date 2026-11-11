@@ -264,8 +264,8 @@ mod tests {
             let mut stream = client_with("localhost", calling, client).expect("client");
             let _ = stream.write_all(b"order");
             // Ended as TLS ends a Stream, and read to the server's close:
-            // a socket closed with the server's session tickets unread is
-            // reset, and on Windows a reset loses what was not yet read.
+            // a socket closed with the server's bytes unread is reset, and
+            // on Windows a reset loses what was not yet read.
             stream.conn.send_close_notify();
             let _ = stream.flush();
             let _ = stream.read_to_end(&mut Vec::new());

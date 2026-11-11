@@ -13,11 +13,11 @@
 
 use std::sync::Arc;
 
-use rustls::sign::{CertifiedKey, SingleCertAndKey};
+use rustls::sign::CertifiedKey;
 
 use crate::revocation::{self, Revocation};
 use crate::signer::{Kept, Sign};
-use crate::{Result, TlsError, configure, pem, provider};
+use crate::{Result, TlsError, configuration, configure, pem, provider};
 
 /// What one end presents and what it trusts: its certificate chain and the
 /// key that signs for it — read from PEM, or kept by its platform's keeper
@@ -38,12 +38,7 @@ impl Identity {
     /// Where a PEM holds no certificate or no key, the certificate and key
     /// do not pair, or an anchor is not a certificate a trust store takes.
     pub fn from_pem(certificate_pem: &[u8], key_pem: &[u8], anchors_pem: &[u8]) -> Result<Self> {
-        let certificates = certificates(certificate_pem, "the certificate")?;
-        let key = pem::private_key(key_pem)?;
-        let presented =
-            CertifiedKey::from_der(certificates, key, &provider()).map_err(|failure| {
-                TlsError::new(format!("loading the certificate and key: {failure}"))
-            })?;
+        let presented = pem::certified(certificate_pem, key_pem, &provider())?;
         Ok(Self {
             presented: Arc::new(presented),
             anchors: Arc::new(anchors(anchors_pem)?),
@@ -66,9 +61,9 @@ impl Identity {
         signer: Arc<dyn Sign>,
         anchors_pem: &[u8],
     ) -> Result<Self> {
-        let certificates = certificates(certificate_pem, "the certificate")?;
+        let chain = pem::chain(certificate_pem, "the certificate")?;
         Ok(Self {
-            presented: Arc::new(CertifiedKey::new(certificates, Arc::new(Kept(signer)))),
+            presented: Arc::new(CertifiedKey::new(chain, Arc::new(Kept(signer)))),
             anchors: Arc::new(anchors(anchors_pem)?),
             revocation: None,
         })
@@ -117,7 +112,8 @@ impl Identity {
     }
 
     /// The same, built from `provider`: the general one, or the proving
-    /// one of `possession`.
+    /// one of `possession`. No session is resumed (`configuration`), so
+    /// every handshake verifies the client's certificate as it stands.
     pub(crate) fn served_by(
         &self,
         asking: bool,
@@ -125,41 +121,26 @@ impl Identity {
     ) -> Result<rustls::ServerConfig> {
         let verifier =
             revocation::verifier(&self.anchors, &provider, asking, self.revocation.as_ref())?;
-        Ok(rustls::ServerConfig::builder_with_provider(provider)
-            .with_protocol_versions(rustls::DEFAULT_VERSIONS)
-            .unwrap_or_else(|_| unreachable!("the default versions are always supported"))
-            .with_client_cert_verifier(verifier)
-            .with_cert_resolver(Arc::new(SingleCertAndKey::from(Arc::clone(
-                &self.presented,
-            )))))
+        Ok(configuration::server(
+            provider,
+            verifier,
+            Arc::clone(&self.presented),
+        ))
     }
 
     /// The client side: checks the server against the anchors and presents
-    /// this identity when asked, with a session cache to resume from, as
-    /// [`configure`] keeps one.
+    /// this identity when asked, resuming no session, as [`configure`]
+    /// resumes none.
     ///
     /// # Errors
     ///
     /// None today; a `Result` beside [`Identity::server`]'s.
     pub fn client(&self) -> Result<rustls::ClientConfig> {
-        let mut config = rustls::ClientConfig::builder_with_provider(provider())
-            .with_protocol_versions(rustls::DEFAULT_VERSIONS)
-            .unwrap_or_else(|_| unreachable!("the default versions are always supported"))
-            .with_root_certificates(Arc::clone(&self.anchors))
-            .with_client_cert_resolver(Arc::new(SingleCertAndKey::from(Arc::clone(
-                &self.presented,
-            ))));
-        config.resumption = configure(rustls::RootCertStore::empty()).resumption;
-        Ok(config)
+        Ok(configuration::client(
+            Arc::clone(&self.anchors),
+            Some(Arc::clone(&self.presented)),
+        ))
     }
-}
-
-fn certificates(pem: &[u8], what: &str) -> Result<Vec<rustls::pki_types::CertificateDer<'static>>> {
-    let found = pem::certificates(pem, what)?;
-    if found.is_empty() {
-        return Err(TlsError::new(format!("{what} held no certificate")));
-    }
-    Ok(found)
 }
 
 /// A client that trusts only the certificates `anchors_pem` holds — a

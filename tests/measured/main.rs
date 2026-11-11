@@ -9,13 +9,63 @@
 //! - proving a browser's key adds under a millisecond to its handshake,
 //!   and the node's check of the transcript takes under one
 //!   (`possession`).
+//! - a full handshake, as every configuration of the library makes, costs
+//!   under a millisecond more than one resumed by rustls's defaults
+//!   (`resumption`).
 
 mod possession;
+mod resumption;
 
 use std::io::{Read, Write};
 use std::time::{Duration, Instant};
 
+use rcgen::{CertificateParams, CertifiedIssuer, ExtendedKeyUsagePurpose, IsCa, KeyPair};
+use xmip_core_library_tls::Identity;
 use xmip_core_library_tls::fixture::pair;
+
+/// What one test authority issued, PEM: its own certificate, and a
+/// server's for `localhost` and a client's, each a certificate and its key.
+struct Issued {
+    authority: String,
+    server: (String, String),
+    client: (String, String),
+}
+
+impl Issued {
+    fn new() -> Self {
+        let authority_key = KeyPair::generate().expect("a key");
+        let mut params = CertificateParams::new(Vec::<String>::new()).expect("params");
+        params.is_ca = IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+        let authority = CertifiedIssuer::self_signed(params, authority_key).expect("an authority");
+        let issue = |purpose: ExtendedKeyUsagePurpose, name: &str| {
+            let key = KeyPair::generate().expect("a key");
+            let mut params = CertificateParams::new(vec![name.to_string()]).expect("params");
+            params.extended_key_usages = vec![purpose];
+            let issued = params.signed_by(&key, &authority).expect("issued");
+            (issued.pem(), key.serialize_pem())
+        };
+        Self {
+            server: issue(ExtendedKeyUsagePurpose::ServerAuth, "localhost"),
+            client: issue(ExtendedKeyUsagePurpose::ClientAuth, "alice"),
+            authority: authority.pem(),
+        }
+    }
+
+    /// The identity of `(certificate, key)`, trusting the authority.
+    fn identity(&self, (certificate, key): &(String, String)) -> Identity {
+        Identity::from_pem(
+            certificate.as_bytes(),
+            key.as_bytes(),
+            self.authority.as_bytes(),
+        )
+        .expect("an identity")
+    }
+}
+
+fn median(mut times: Vec<Duration>) -> Duration {
+    times.sort();
+    times[times.len() / 2]
+}
 
 #[test]
 fn a_write_is_not_held_up_by_a_read_waiting_on_the_same_connection() {

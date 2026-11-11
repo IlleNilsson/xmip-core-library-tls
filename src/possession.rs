@@ -12,7 +12,8 @@
 //! so the holder of that key made this handshake after the node's nonce
 //! was issued, to the server whose certificate the transcript names. TLS
 //! 1.3 and 1.2 are both held; a resumed session carries no
-//! `CertificateVerify` and proves nothing, so a proving server resumes none.
+//! `CertificateVerify` and proves nothing, and a proving server, as every
+//! configuration of this library, resumes none.
 //! The handshake secrets TLS 1.3 needs to read its own transcript stay in
 //! this module, for one handshake, and are zeroed after.
 

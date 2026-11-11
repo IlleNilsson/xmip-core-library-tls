@@ -55,9 +55,10 @@ impl rustls::KeyLog for Kept {
 /// The server a browser proves possession to: `identity` presented, a
 /// client's certificate asked for and checked against its anchors, one that
 /// presents none let through as no one ([`Identity::server_asking`]), its
-/// random bound ([`bound`]), its handshake secrets kept for the transcript,
-/// and no session resumed — a resumed session proves nothing, so every
-/// handshake is a full one.
+/// random bound (`bound`), and its handshake secrets kept for the
+/// transcript. A resumed session proves nothing; as no configuration of
+/// this library resumes one (`configuration`), every handshake is a full
+/// one.
 ///
 /// # Errors
 ///
@@ -65,8 +66,6 @@ impl rustls::KeyLog for Kept {
 pub fn proving(identity: &Identity) -> Result<rustls::ServerConfig> {
     let mut config = identity.served_by(true, bound::provider())?;
     config.key_log = Arc::new(Kept);
-    config.session_storage = Arc::new(rustls::server::NoServerSessionStorage {});
-    config.send_tls13_tickets = 0;
     Ok(config)
 }
 

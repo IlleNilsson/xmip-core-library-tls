@@ -3,7 +3,7 @@
 use std::net::TcpStream;
 use std::sync::Arc;
 
-use crate::{Result, TlsError, pem, provider};
+use crate::{Result, TlsError, configuration, pem, provider};
 
 /// A server-side TLS connection, ready to read and write — a Receive
 /// Location's guarded channel. ADR-0033.
@@ -12,26 +12,20 @@ pub type GuardedServer = rustls::StreamOwned<rustls::ServerConnection, TcpStream
 /// A server configuration from a certificate chain and its private key, both
 /// PEM. This is the Receive side of certificates: the node presents this
 /// certificate to callers. Client-certificate verification (mutual-TLS)
-/// layers a verifier onto this.
+/// layers a verifier onto this. No session is resumed
+/// (`configuration`).
 ///
 /// # Errors
 ///
 /// Where the certificate or key cannot be read, or the pair is not usable.
 pub fn server_config(certificate_pem: &[u8], key_pem: &[u8]) -> Result<rustls::ServerConfig> {
-    let certificates = pem::certificates(certificate_pem, "the certificate")?;
-
-    if certificates.is_empty() {
-        return Err(TlsError::new("the certificate PEM held no certificate"));
-    }
-
-    let key = pem::private_key(key_pem)?;
-
-    rustls::ServerConfig::builder_with_provider(provider())
-        .with_protocol_versions(rustls::DEFAULT_VERSIONS)
-        .unwrap_or_else(|_| unreachable!("the default versions are always supported"))
-        .with_no_client_auth()
-        .with_single_cert(certificates, key)
-        .map_err(|failure| TlsError::new(format!("loading the certificate and key: {failure}")))
+    let provider = provider();
+    let presented = pem::certified(certificate_pem, key_pem, &provider)?;
+    Ok(configuration::server(
+        provider,
+        Arc::new(rustls::server::NoClientAuth),
+        Arc::new(presented),
+    ))
 }
 
 /// Answer a TLS connection on an already-accepted socket.
@@ -55,7 +49,7 @@ mod tests {
 
     use super::*;
     use crate::client::{client_with, configure};
-    use crate::fixture::connected;
+    use crate::fixture::{connected, handshakes};
 
     fn self_signed() -> rcgen::CertifiedKey<rcgen::KeyPair> {
         rcgen::generate_simple_self_signed(vec!["localhost".to_string()])
@@ -141,6 +135,51 @@ mod tests {
             handshake(Some(classical)),
             (rustls::NamedGroup::X25519, rustls::NamedGroup::X25519)
         );
+    }
+
+    #[test]
+    fn a_client_that_would_resume_is_given_nothing_to_resume_and_shakes_hands_in_full() {
+        let signed = self_signed();
+        let served = server_config(
+            signed.cert.pem().as_bytes(),
+            signed.signing_key.serialize_pem().as_bytes(),
+        )
+        .expect("server config");
+        let mut roots = rustls::RootCertStore::empty();
+        roots.add(signed.cert.der().clone()).expect("trusted");
+        // A client of rustls's defaults: a session cache to resume from.
+        let resuming = rustls::ClientConfig::builder_with_provider(provider())
+            .with_protocol_versions(rustls::DEFAULT_VERSIONS)
+            .expect("versions")
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+
+        let full = Some(rustls::HandshakeKind::Full);
+        let kinds = handshakes(&Arc::new(resuming), &Arc::new(served), 2);
+        assert_eq!(kinds, [full, full]);
+    }
+
+    #[test]
+    fn a_tls_1_2_client_that_would_resume_by_session_id_is_given_none_and_shakes_hands_in_full() {
+        let signed = self_signed();
+        let served = server_config(
+            signed.cert.pem().as_bytes(),
+            signed.signing_key.serialize_pem().as_bytes(),
+        )
+        .expect("server config");
+        let mut roots = rustls::RootCertStore::empty();
+        roots.add(signed.cert.der().clone()).expect("trusted");
+        // A TLS 1.2 client of rustls's defaults: it resumes by session ID
+        // where the server stored one.
+        let resuming = rustls::ClientConfig::builder_with_provider(provider())
+            .with_protocol_versions(&[&rustls::version::TLS12])
+            .expect("versions")
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+
+        let full = Some(rustls::HandshakeKind::Full);
+        let kinds = handshakes(&Arc::new(resuming), &Arc::new(served), 2);
+        assert_eq!(kinds, [full, full]);
     }
 
     #[test]

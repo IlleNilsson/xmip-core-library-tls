@@ -7,47 +7,12 @@ use std::net::TcpStream;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use rcgen::{CertificateParams, CertifiedIssuer, ExtendedKeyUsagePurpose, IsCa, KeyPair};
-use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
-use xmip_core_library_tls::Identity;
 use xmip_core_library_tls::fixture::connected;
 use xmip_core_library_tls::possession::{binding, handshaken, proved, proving};
 
-const ROUNDS: usize = 31;
+use crate::{Issued, median};
 
-/// The server's identity and a client's configuration presenting a
-/// certificate, under one test authority.
-fn parties() -> (Identity, Arc<rustls::ClientConfig>) {
-    let authority_key = KeyPair::generate().expect("a key");
-    let mut params = CertificateParams::new(Vec::<String>::new()).expect("params");
-    params.is_ca = IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
-    let authority = CertifiedIssuer::self_signed(params, authority_key).expect("an authority");
-    let issue = |purpose: ExtendedKeyUsagePurpose, name: &str| {
-        let key = KeyPair::generate().expect("a key");
-        let mut params = CertificateParams::new(vec![name.to_string()]).expect("params");
-        params.extended_key_usages = vec![purpose];
-        let issued = params.signed_by(&key, &authority).expect("issued");
-        (issued, key)
-    };
-    let (server, server_key) = issue(ExtendedKeyUsagePurpose::ServerAuth, "localhost");
-    let (client, client_key) = issue(ExtendedKeyUsagePurpose::ClientAuth, "alice");
-    let identity = Identity::from_pem(
-        server.pem().as_bytes(),
-        server_key.serialize_pem().as_bytes(),
-        authority.pem().as_bytes(),
-    )
-    .expect("the server's identity");
-    let mut roots = rustls::RootCertStore::empty();
-    roots.add(authority.der().clone()).expect("trusted");
-    let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(client_key.serialize_der()));
-    let client = rustls::ClientConfig::builder_with_provider(xmip_core_library_tls::provider())
-        .with_protocol_versions(rustls::DEFAULT_VERSIONS)
-        .expect("versions")
-        .with_root_certificates(roots)
-        .with_client_auth_cert(vec![CertificateDer::from(client.der().to_vec())], key)
-        .expect("a client certificate");
-    (identity, Arc::new(client))
-}
+const ROUNDS: usize = 31;
 
 /// One browser's handshake against a server that `serve` answers, and how
 /// long the server took from the connection to its finished handshake.
@@ -72,14 +37,11 @@ fn timed(client: &Arc<rustls::ClientConfig>, serve: &dyn Fn(TcpStream)) -> Durat
     took
 }
 
-fn median(mut times: Vec<Duration>) -> Duration {
-    times.sort();
-    times[times.len() / 2]
-}
-
 #[test]
 fn proving_a_browsers_key_adds_under_a_millisecond_to_its_handshake_and_its_check() {
-    let (identity, client) = parties();
+    let issued = Issued::new();
+    let identity = issued.identity(&issued.server);
+    let client = Arc::new(issued.identity(&issued.client).client().expect("a client"));
     let plain = Arc::new(identity.server_asking().expect("a server"));
     let bound = Arc::new(proving(&identity).expect("a proving server"));
     let nonces = binding(&[&[1u8; 16][..], &[2u8; 16][..]]);

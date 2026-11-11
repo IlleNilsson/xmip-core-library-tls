@@ -13,13 +13,14 @@
 //! disarmed — the `ServerHello`'s random among them, whichever it is: in
 //! rustls 0.23.46, the version `Cargo.toml` pins for this, a retried
 //! handshake draws one for the `HelloRetryRequest` and another for the
-//! `ServerHello`, and TLS 1.2 a session ID after it, which a proving server
-//! keeps nowhere. Every other draw is the operating system's. The last 8
-//! bytes stay random: rustls writes TLS 1.2's downgrade sentinel there
-//! (RFC 8446 section 4.1.3). A test of recorded handshakes holds this for
-//! 1.3, 1.3 retried and 1.2; where a later rustls draws otherwise, the node
-//! finds no binding and refuses relay in words. The arming is a guard
-//! dropped on every way out, a panic's unwind included.
+//! `ServerHello`; TLS 1.2 draws no session ID, as no server of this library
+//! stores a session (`configuration`). Every other draw is the operating
+//! system's. The last 8 bytes stay random: rustls writes TLS 1.2's
+//! downgrade sentinel there (RFC 8446 section 4.1.3). A test of recorded
+//! handshakes holds this for 1.3, 1.3 retried and 1.2; where a later
+//! rustls draws otherwise, the node finds no binding and refuses relay in
+//! words. The arming is a guard dropped on every way out, a panic's unwind
+//! included.
 
 use std::cell::Cell;
 use std::sync::{Arc, LazyLock};

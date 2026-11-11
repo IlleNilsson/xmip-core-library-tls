@@ -42,18 +42,20 @@ first alone; `peer::presented` hands the client's leaf over whole, DER.
 ADR-0009, amendment 2026-11-02). A web host takes its browsers' TLS and the
 nodes decide who acts, so the proof is the handshake itself.
 `possession::proving` is the one configuration that makes it: the host's
-identity, a client's certificate asked for, no session resumed — a resumed
-session signs nothing — and a random source that, on a thread a handshake
-is armed on, writes `possession::binding` of the nodes' fresh nonces into
-the first 24 bytes of every 32-byte random it draws, the `ServerHello`'s
-among them (rustls 0.23.46 draws one for a `HelloRetryRequest` and another
-for the `ServerHello`, and TLS 1.2 a session ID after it; the last 8 bytes
-stay random, TLS 1.2's downgrade sentinel there). `Cargo.toml` pins that
-rustls exactly, because the binding holds only for the draw order the tests
-pin; the pin moves with those tests. The thread is armed by a guard that
-disarms it and zeroes the handshake's secrets on every way out, a panic's
-unwind included, so a binding never reaches a later draw. `possession::handshaken`
-makes the handshake over a recording of the socket, and its
+identity, a client's certificate asked for, no session resumed, as no
+server here resumes one — a resumed session signs nothing — and a random
+source that, on a thread a handshake is armed on, writes
+`possession::binding` of the nodes' fresh nonces into the first 24 bytes
+of every 32-byte random it draws, the `ServerHello`'s among them (rustls
+0.23.46 draws one for a `HelloRetryRequest` and another for the
+`ServerHello`, and in TLS 1.2 no session ID, as no session is stored; the
+last 8 bytes stay random, TLS 1.2's downgrade sentinel there). `Cargo.toml`
+pins that rustls exactly, because the binding holds only for the draw
+order the tests pin; the pin moves with those tests. The thread is armed by
+a guard that disarms it and zeroes the handshake's secrets on every way
+out, a panic's unwind included, so a binding never reaches a later draw.
+`possession::handshaken` makes the handshake over a recording of the
+socket, and its
 `Recorded::transcript` recovers the transcript after, apart from the
 handshake — the handshake messages from the ClientHello through the
 client's CertificateVerify — reading TLS 1.3's sealed handshake records
@@ -91,8 +93,71 @@ list past its nextUpdate refuses every client it would decide unless the
 configuration says otherwise (`accepting_expired`). Every mutual-TLS
 listener between Xmip's own parts is given its authority's lists; tests
 refuse a revoked client and let its neighbor through, refuse every client
-on an expired list and accept it where configured, and read a list written
-anew at the next handshake.
+on an expired list and accept it where configured, read a list written
+anew at the next handshake, and refuse a client revoked after its first
+connection at its second, which no session resumed lets in.
+
+**No session is resumed** (`configuration`; ADR-0033, amendment
+2026-11-10). rustls resumes a session without calling the verifier: a
+resumed TLS 1.3 handshake asks the client for no certificate and copies
+the chain the session stored (rustls 0.23.46, `server/tls13.rs`), and a
+client resuming does not look at the server's certificate again. Until
+2026-11-10 the library kept rustls's defaults — a server's session cache
+and two tickets after every handshake, a client's cache of 256 sessions —
+so a client admitted once was admitted again after it was revoked, expired
+or its anchor was taken away, for as long as it resumed. Every server and
+client configuration is now built in one place, `configuration`, which
+stores no session, sends no ticket and keeps none to offer, TLS 1.3 and
+1.2 alike: `server_config`, `configure`, `Identity::server`,
+`server_asking` and `client`, and `possession::proving`. A test reads the
+library's own source and fails where any other file builds a
+configuration or sets its resumption; a caller holding a `ClientConfig` or
+`ServerConfig` can still set those fields, which no module does. Every
+handshake is full and verifies the peer's certificate as it stands, which
+taking trust back depends on. A client still keeps the key exchange group
+each server chose, as rustls's cache did, so a server that takes neither
+X25519MLKEM768 nor X25519 — one limited to P-256 or P-384 — asks for
+another group with a `HelloRetryRequest` at the first connection only.
+
+The price, measured by the timing program (`tests/measured/resumption.rs`,
+`cargo test --test measured --all-features -- --test-threads=1`), both ends
+on one thread over memory against rustls's defaults, 201 rounds each, four
+runs on 2026-11-10 with the processor at 80 to 94% from other builds: a
+mutual-TLS handshake 1.66 to 2.24 ms at its fastest where a resumed one
+took 1.27 to 1.42 ms, 0.38 to 0.87 ms more (medians 2.37 to 3.68 ms
+against 1.86 to 2.91 ms); a server authenticated alone 1.37 to 1.63 ms
+where it took 1.24 to 1.49 ms, 0.07 to 0.29 ms more (medians 2.04 to 2.92
+against 1.82 to 2.60 ms). The program holds the added cost, at the
+fastest, under a millisecond; a run on a quiet machine is still owed, and
+the more loaded the machine, the closer the mutual-TLS cost came to the
+bound. A resumed TLS 1.3 handshake still agrees a fresh X25519MLKEM768
+key, which is why resuming saved only the certificates' signatures and
+their checks, and it takes the same one round trip as a full one. A TLS
+1.2 peer pays a second round trip on top: a full TLS 1.2 handshake takes
+two where a resumed one took one, milliseconds to tens of milliseconds
+more to a Party across a wide-area link. It is paid once per connection;
+what is sent on a connection already open pays nothing more. Tests: a
+kept client configuration resumes nothing from a server of rustls's
+defaults, a client of rustls's defaults is given nothing to resume in TLS
+1.3 or by a TLS 1.2 session ID, a kept client is asked for its group again
+only once, and the revocation test above.
+
+**One login resumes its own session** (`login_trusting`). FTPS (RFC 4217)
+opens a data connection beside its control connection for each transfer,
+and a server may refuse a data connection that does not resume the control
+connection's session — vsftpd's `require_ssl_reuse`, on by default.
+`login_trusting` builds a client configuration for one login, trusting as
+`client_trusting` does, with a session store of its own: the control
+connection's handshake is full and checks the server's certificate, and the
+data connections of that login resume it while the control connection they
+belong to stays open, checked no more than they are. No other login and no
+other connection sees the store, and a test holds it: one login's
+connections full, resumed, resumed against a server of rustls's defaults,
+another login's first full. The ftp transport builds one per login
+(`Secured::login`, called as `Client::connect_secured` starts the login)
+and guards that login's control and data connections with it; no test yet
+holds a data connection to resuming against a far end that refuses one
+that does not (open problem 61).
 
 **A key it cannot read.** `Identity::from_pem` presents a chain with its PEM
 key; `Identity::from_signer` presents a chain whose key its platform's
@@ -110,18 +175,17 @@ at once never waits to write behind its own waiting read. A read timeout on
 the socket loses nothing of a record. The Event link between nodes
 (`xmip-core-event`) runs on it.
 
-**Loaded once, resumed after.** The operating system's trust store is read
-the first time a connection needs it, and a client configuration is built
-once per list of protocols offered and shared by every connection after;
-the cryptographic provider is built once. The configuration keeps rustls's
-session cache, so a second connection to a server resumes the session the
-first agreed rather than repeating the full handshake — a test holds the
-second handshake to `Resumed`. Until 2026-09-27 every connection read the
-store and built its own configuration, and resumed nothing. A caller with
-its own trust store (`client_with`) keeps its configuration the same way.
+**Loaded once.** The operating system's trust store is read the first time
+a connection needs it, and a client configuration is built once per list
+of protocols offered and shared by every connection after; the
+cryptographic provider is built once. Until 2026-09-27 every connection
+read the store and built its own configuration. A caller with its own
+trust store (`client_with`) keeps its configuration the same way. No
+connection resumes a session but within one login (above).
 A protocol whose trust store is optional calls `client_trusting`: the
 configured store where one is given, the operating system's otherwise, a
-choice made here once and not in each transport.
+choice made here once and not in each transport; `login_trusting` makes
+the same choice for one login.
 
 Until 2026-09-23 TLS sat inside `xmip-core-transport-http`, so the transports
 riding on HTTP could reach it and the twenty that do not — SMTP and IMAP with

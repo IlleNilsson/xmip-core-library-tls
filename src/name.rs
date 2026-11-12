@@ -78,6 +78,18 @@ impl Name {
         self.attributes.is_empty()
     }
 
+    /// Its common name, `CN`, where it names one that is not empty: what a
+    /// node certificate is issued for, `CN=<node>` (`xmip-core-provision`),
+    /// and what a Storage node counts a node's traffic against (ADR-0052,
+    /// amendment 2026-11-11). The one reading of it from a name.
+    #[must_use]
+    pub fn common_name(&self) -> Option<&str> {
+        self.attributes
+            .iter()
+            .find(|(kind, value)| kind == "CN" && !value.is_empty())
+            .map(|(_, value)| value.as_str())
+    }
+
     fn of(name: &X509Name<'_>) -> Self {
         let mut attributes: Vec<(String, String)> = name
             .iter()
@@ -171,6 +183,22 @@ mod tests {
 
         assert_eq!(name.to_string(), "CN=Party\\, Inc,O=Party X");
         assert_ne!(name, Name::parse("CN=Party,O=Party X"));
+    }
+
+    #[test]
+    fn its_common_name_is_read_in_any_case_order_and_escape() {
+        assert_eq!(Name::parse("CN=edge-01").common_name(), Some("edge-01"));
+        assert_eq!(
+            Name::parse("O=Xmip, cn = store-02 ").common_name(),
+            Some("store-02")
+        );
+        assert_eq!(
+            Name::parse("CN=Party\\, Inc,O=Party X").common_name(),
+            Some("Party, Inc"),
+            "an escaped comma is the value's"
+        );
+        assert_eq!(Name::parse("O=Xmip").common_name(), None);
+        assert_eq!(Name::parse("CN=").common_name(), None);
     }
 
     #[test]

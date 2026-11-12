@@ -32,7 +32,9 @@ then. `Name` is a distinguished name as its attributes, written in one
 order, so `CN=x,O=y` and `O = y, cn = x` are one name; it moved here from
 `xmip-core-authenticate` on 2026-10-19, so the name a transport writes and
 the name the identity gates compare are one reading (ADR-0033, amendment
-2026-10-19). `peer::handshaken` finishes the handshake the same way and says
+2026-10-19); `Name::common_name` is the one reading of its `CN`, the node a
+node certificate is issued for, which a Storage node counts a node's traffic
+against (ADR-0052, amendment 2026-11-11). `peer::handshaken` finishes the handshake the same way and says
 of one that did not finish whether the client's certificate was refused —
 one that does not reach the anchors, or none where one is required — or the
 client merely stopped (`peer::Unanswered`), so a host tells its audit of the

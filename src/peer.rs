@@ -158,8 +158,8 @@ pub fn presented(connection: &rustls::ServerConnection) -> Option<Vec<u8>> {
 /// way a transport reports it beside the subject and a gate checks it.
 #[must_use]
 pub fn fingerprint(certificate: &[u8]) -> String {
-    let digest = aws_lc_rs::digest::digest(&aws_lc_rs::digest::SHA256, certificate);
-    format!("SHA256:{}", codec::hex::encode(digest.as_ref()))
+    let digest = codec::digest::sha256(certificate);
+    format!("SHA256:{}", codec::hex::encode(&digest))
 }
 
 /// Whether the certificate `der` authenticates a server: its extended key
@@ -169,17 +169,14 @@ pub fn fingerprint(certificate: &[u8]) -> String {
 /// certificate that is not X.509 or names no extended key usage.
 #[must_use]
 pub fn authenticates_servers(der: &[u8]) -> bool {
-    use x509_parser::prelude::{FromDer, X509Certificate};
-    X509Certificate::from_der(der)
+    crate::certificate::Certificate::read(der)
         .ok()
-        .and_then(|(_, parsed)| {
-            parsed
-                .extended_key_usage()
-                .ok()
-                .flatten()
-                .map(|eku| eku.value.server_auth)
+        .and_then(|read| read.extended_key_usages().ok().flatten())
+        .is_some_and(|usages| {
+            usages
+                .iter()
+                .any(|usage| usage == crate::certificate::oid::SERVER_AUTH)
         })
-        .unwrap_or(false)
 }
 
 #[cfg(test)]

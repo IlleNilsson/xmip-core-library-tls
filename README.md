@@ -144,20 +144,20 @@ defaults, a client of rustls's defaults is given nothing to resume in TLS
 1.3 or by a TLS 1.2 session ID, a kept client is asked for its group again
 only once, and the revocation test above.
 
-**One login resumes its own session** (`login_trusting`). FTPS (RFC 4217)
-opens a data connection beside its control connection for each transfer,
-and a server may refuse a data connection that does not resume the control
-connection's session — vsftpd's `require_ssl_reuse`, on by default.
-`login_trusting` builds a client configuration for one login, trusting as
-`client_trusting` does, with a session store of its own: the control
+**One login resumes its own session** (`ClientSettings::login`). FTPS (RFC
+4217) opens a data connection beside its control connection for each
+transfer, and a server may refuse a data connection that does not resume the
+control connection's session — vsftpd's `require_ssl_reuse`, on by default.
+`ClientSettings::login` builds client settings for one login, the same name
+and trust, with a session store of its own: the control
 connection's handshake is full and checks the server's certificate, and the
 data connections of that login resume it while the control connection they
 belong to stays open, checked no more than they are. No other login and no
 other connection sees the store, and a test holds it: one login's
 connections full, resumed, resumed against a server of rustls's defaults,
 another login's first full. The ftp transport builds one per login
-(`Secured::login`, called as `Client::connect_secured` starts the login)
-and guards that login's control and data connections with it; no test yet
+(`ClientSettings::login`, called as `Client::connect_secured` starts the
+login) and guards that login's control and data connections with it; no test yet
 holds a data connection to resuming against a far end that refuses one
 that does not (open problem 61).
 
@@ -184,10 +184,33 @@ cryptographic provider is built once. Until 2026-09-27 every connection
 read the store and built its own configuration. A caller with its own
 trust store (`client_with`) keeps its configuration the same way. No
 connection resumes a session but within one login (above).
-A protocol whose trust store is optional calls `client_trusting`: the
-configured store where one is given, the operating system's otherwise, a
-choice made here once and not in each transport; `login_trusting` makes
-the same choice for one login.
+
+**What a client checks a server by** (`ClientSettings`; ADR-0033,
+amendment 2026-11-13). The trust store a server's certificate is checked
+against — the configured one where one is given, the operating system's
+otherwise — and the name it is checked for — the given one, or the host
+reached: one type, held by every client whose trust store is optional, and
+`ClientSettings::client` makes the choice once and not in each transport.
+The `MariaDB` library and the MariaDB and MySQL transports, DB2, FTPS, the
+LDAP and OAuth 2.0 gates and the ACME client hold it; until 2026-11-13 the
+`MariaDB` library, DB2 and FTP each declared the pair (`Guard`, `Secured`,
+`Secured`) and the other three kept the trust store alone, through
+`client_trusting` and `login_trusting`, which are gone.
+
+**One certificate reader** (`certificate`; ADR-0033, amendment
+2026-11-13). `Certificate::read` walks a certificate once over the estate's
+X.690 reader (`xmip-core-library-asn1`): what its issuer signed, its serial,
+issuer and subject, its validity, its key, its extensions in order and its
+signature, and from them its common name, DNS names, other names, authority
+key identifier and extended key usages; `unique_extension` refuses one
+carried twice, `signed_by` and `verifies` check a P-256 signature. `Name`,
+`peer::authenticates_servers` and `possession`'s transcript check read
+through it, as do the identity gates, provisioning and the SAML gate;
+`certificate::oid` holds the object identifiers both the reader and
+provisioning's writer name. PEM is `codec::pem`'s, SHA-256 `codec::digest`'s.
+Until 2026-11-13 certificates were read three ways — provisioning's walk
+over asn1, this library's and the gates' over x509-parser, and SAML's over
+x509-parser again — and PEM four.
 
 Until 2026-09-23 TLS sat inside `xmip-core-transport-http`, so the transports
 riding on HTTP could reach it and the twenty that do not — SMTP and IMAP with

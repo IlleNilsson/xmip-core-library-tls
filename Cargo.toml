@@ -16,8 +16,9 @@ path = "src/lib.rs"
 # rustls with its default provider, aws-lc-rs, because ring has no ML-KEM and
 # the hybrid key exchange is the point (ADR-0033, amendment 2026-09-22). Its
 # assembler comes prebuilt, so a Windows build needs no NASM. A certificate
-# chain and a private key are read as PEM through the `PemObject` of the
-# rustls-pki-types it brings (`pem`).
+# chain and a private key are read as PEM by the estate's one reader,
+# `codec::pem`, into the DER types of the rustls-pki-types it brings
+# (`pem`).
 #
 # Pinned exactly: the possession proof writes its binding into every 32-byte
 # random rustls draws on an armed thread (`possession::bound`), which holds
@@ -28,15 +29,18 @@ rustls = "=0.23.46"
 # The operating system's trust store rather than a bundled root list: the
 # organizations Xmip is aimed at run their own certificate authorities.
 rustls-native-certs = "0.8"
-# A certificate's subject and issuer, which rustls keeps as DER (`name`):
-# what a server that terminates TLS reports of its client (`peer`), and
-# what the identity gates compare a claim with.
-x509-parser = "0.18"
-# The leaf's SHA-256 fingerprint (`peer`), from the provider rustls already
-# brings, its assembler prebuilt.
+# X.690, the estate's one reader, which the one certificate reader
+# (`certificate`) walks a certificate with: its names, which rustls keeps as
+# DER (`name`), what a server that terminates TLS reports of its client
+# (`peer`), and what the identity gates, provisioning and SAML read.
+asn1 = { package = "xmip-core-library-asn1", git = "https://github.com/IlleNilsson/xmip-core-library-asn1", branch = "main" }
+# The provider rustls already brings, its assembler prebuilt: a P-256
+# signature checked (`certificate::verify`), and a recorded handshake's
+# transcript, keys and records read (`possession`).
 aws-lc-rs = { version = "1", features = ["prebuilt-nasm"] }
 # Hexadecimal, as every reader in the estate writes it: a fingerprint, and
-# an attribute value that is not text.
+# an attribute value that is not text; PEM (`codec::pem`), SHA-256 for a
+# fingerprint (`codec::digest`) and the civil calendar a time is read into.
 codec = { package = "xmip-core-library-codec", git = "https://github.com/IlleNilsson/xmip-core-library-codec", branch = "main" }
 # The TLS 1.3 handshake secrets a recorded handshake is read with, zeroed
 # once its transcript is read (`possession`); the crate the estate zeroes

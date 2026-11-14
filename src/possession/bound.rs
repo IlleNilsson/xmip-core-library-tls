@@ -70,14 +70,14 @@ pub(crate) fn provider() -> Arc<CryptoProvider> {
 /// same of the list it is handed, and finds its own nonce in it.
 #[must_use]
 pub fn binding(nonces: &[&[u8]]) -> [u8; BINDING] {
-    let mut digest = aws_lc_rs::digest::Context::new(&aws_lc_rs::digest::SHA256);
+    let mut digest = codec::digest::Sha256::new();
     for nonce in nonces {
         let length = u16::try_from(nonce.len()).unwrap_or(u16::MAX);
         digest.update(&length.to_be_bytes());
         digest.update(nonce);
     }
     let mut bound = [0u8; BINDING];
-    bound.copy_from_slice(&digest.finish().as_ref()[..BINDING]);
+    bound.copy_from_slice(&digest.finish()[..BINDING]);
     bound
 }
 

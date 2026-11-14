@@ -7,8 +7,6 @@
 //! included, which the node's nonce is bound into — and to the server
 //! whose certificate the transcript names.
 
-use x509_parser::prelude::{FromDer, X509Certificate};
-
 use super::message::{self, CERTIFICATE, CERTIFICATE_VERIFY, CLIENT_HELLO, FINISHED};
 use super::message::{Hello, MESSAGE_HASH, Message, Reader, SERVER_HELLO, SERVER_HELLO_DONE};
 use crate::{Result, TlsError, provider};
@@ -162,9 +160,9 @@ fn tls13_content(before: &[Message<'_>], suite: u16) -> Result<Vec<u8>> {
 /// Whether `signed` is `leaf`'s key's signature by `scheme` over `content`,
 /// by the provider's own verification algorithms.
 fn verified(leaf: &[u8], scheme: u16, content: &[u8], signed: &[u8]) -> Result<()> {
-    let (_, certificate) = X509Certificate::from_der(leaf)
+    let certificate = crate::certificate::Certificate::read(leaf)
         .map_err(|failure| TlsError::new(format!("the client's leaf is not X.509: {failure}")))?;
-    let key = certificate.public_key().subject_public_key.data.as_ref();
+    let key = crate::certificate::subject_public_key(&certificate.public_key_info)?;
     let scheme = rustls::SignatureScheme::from(scheme);
     let algorithms = provider()
         .signature_verification_algorithms

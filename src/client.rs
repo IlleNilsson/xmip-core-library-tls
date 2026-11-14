@@ -7,7 +7,8 @@
 //! a configuration of its own. No configuration resumes a session
 //! (`configuration`): every connection checks the server's certificate in
 //! a full handshake, but a data connection of one login
-//! ([`login_trusting`]), which resumes its control connection's.
+//! ([`crate::ClientSettings::login`]), which resumes its control
+//! connection's.
 
 use std::net::TcpStream;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -62,23 +63,6 @@ pub fn client_with(
     Ok(rustls::StreamOwned::new(connection, tcp))
 }
 
-/// Wrap a connection in TLS for one host, against `trust` where the
-/// configuration gives a trust store — a Party's own certificate authority,
-/// a directory's or an authorization server's — and the operating system's
-/// where it gives none: [`client_with`] or [`client`]. The one choice every
-/// protocol with an optional trust store makes, made here once.
-///
-/// # Errors
-///
-/// As [`client`]; with `trust` given, as [`client_with`].
-pub fn client_trusting(
-    host: &str,
-    tcp: TcpStream,
-    trust: Option<&Arc<rustls::ClientConfig>>,
-) -> Result<Guarded> {
-    client_with(host, tcp, trusted(trust)?)
-}
-
 /// A client configuration over `roots`, with this node's key exchange,
 /// presenting no certificate and resuming no session.
 #[must_use]
@@ -87,27 +71,36 @@ pub fn configure(roots: impl Into<Arc<rustls::RootCertStore>>) -> rustls::Client
 }
 
 /// A client configuration for one login — a control connection and the
-/// data connections opened beside it, as FTPS's (RFC 4217) — trusting as
-/// [`client_trusting`] does: `trust` where it is given, the operating
-/// system's store where it is not. The login's own connections resume its
-/// first session and no other connection does (`configuration`). Built
-/// once per login, used for each of its connections, and dropped with it.
+/// data connections opened beside it, as FTPS's (RFC 4217) — trusting
+/// `trust` where it is given and the operating system's store where it is
+/// not. The login's own connections resume its first session and no other
+/// connection does (`configuration`). Built once per login, used for each
+/// of its connections, and dropped with it ([`crate::ClientSettings::login`]).
 ///
 /// # Errors
 ///
 /// Without `trust`, where the operating system's trust store is empty or
 /// unreadable.
-pub fn login_trusting(
+pub(crate) fn login(
     trust: Option<&Arc<rustls::ClientConfig>>,
 ) -> Result<Arc<rustls::ClientConfig>> {
     let trusting = trusted(trust)?;
     Ok(Arc::new(configuration::login(&trusting)))
 }
 
-/// `trust` where the configuration gives a trust store, and the operating
-/// system's, offering no protocol, where it gives none: the one choice
-/// [`client_trusting`] and [`login_trusting`] make.
-fn trusted(trust: Option<&Arc<rustls::ClientConfig>>) -> Result<Arc<rustls::ClientConfig>> {
+/// `trust` where the settings give a trust store — a Party's own
+/// certificate authority, a directory's or an authorization server's — and
+/// the operating system's, offering no protocol, where they give none: the
+/// one choice every protocol with an optional trust store makes, made here
+/// once ([`crate::ClientSettings`]).
+///
+/// # Errors
+///
+/// Without `trust`, where the operating system's trust store is empty or
+/// unreadable.
+pub(crate) fn trusted(
+    trust: Option<&Arc<rustls::ClientConfig>>,
+) -> Result<Arc<rustls::ClientConfig>> {
     match trust {
         Some(config) => Ok(Arc::clone(config)),
         None => native(&[]),
@@ -251,8 +244,11 @@ mod tests {
         let mut near = near.into_iter();
         let mut byte = [0u8; 1];
 
-        let mut trusted =
-            client_trusting("localhost", near.next().expect("one"), Some(&given)).expect("tls");
+        // Checked for the name the settings give, not the address reached.
+        let mut trusted = crate::ClientSettings::trusting(given)
+            .named("localhost")
+            .client("127.0.0.1", near.next().expect("one"))
+            .expect("tls");
         trusted
             .read_exact(&mut byte)
             .expect("the given store trusts the server");
@@ -262,7 +258,8 @@ mod tests {
         // The operating system's store does not hold a self-signed
         // certificate made a moment ago: refused at the handshake, or before
         // it on a machine without a store.
-        let refused = client_trusting("localhost", near.next().expect("two"), None)
+        let refused = crate::ClientSettings::native()
+            .client("localhost", near.next().expect("two"))
             .map_or(true, |mut system| system.read_exact(&mut byte).is_err());
         far.join().expect("far end");
 

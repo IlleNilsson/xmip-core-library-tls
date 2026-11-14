@@ -17,9 +17,8 @@
 
 use std::fmt;
 
-use x509_parser::prelude::{FromDer, RelativeDistinguishedName, X509Certificate, X509Name};
-
-use crate::{Result, TlsError};
+use crate::Result;
+use crate::certificate::{Certificate, attributes};
 
 /// A distinguished name: its attributes, type and value.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -60,7 +59,7 @@ impl Name {
     ///
     /// The bytes are not an X.509 certificate.
     pub fn subject_of(certificate: &[u8]) -> Result<Self> {
-        Ok(Self::of(certified(certificate)?.subject()))
+        Self::of(&Certificate::read(certificate)?.subject)
     }
 
     /// The issuer of a certificate, DER.
@@ -69,7 +68,7 @@ impl Name {
     ///
     /// The bytes are not an X.509 certificate.
     pub fn issuer_of(certificate: &[u8]) -> Result<Self> {
-        Ok(Self::of(certified(certificate)?.issuer()))
+        Self::of(&Certificate::read(certificate)?.issuer)
     }
 
     /// Whether the name is empty.
@@ -90,21 +89,22 @@ impl Name {
             .map(|(_, value)| value.as_str())
     }
 
-    fn of(name: &X509Name<'_>) -> Self {
-        let mut attributes: Vec<(String, String)> = name
-            .iter()
-            .flat_map(RelativeDistinguishedName::iter)
+    /// The name `name`, a `Name` DER whole, holds: a value that is not text
+    /// written `#` and its hexadecimal.
+    fn of(name: &[u8]) -> Result<Self> {
+        let mut attributes: Vec<(String, String)> = attributes(name)?
+            .into_iter()
             .map(|attribute| {
-                let value = attribute.as_str().map_or_else(
-                    |_| format!("#{}", codec::hex::encode(attribute.attr_value().data)),
+                let value = attribute.text().map_or_else(
+                    || format!("#{}", codec::hex::encode(&attribute.value)),
                     ToString::to_string,
                 );
-                (short(&attribute.attr_type().to_id_string()), value)
+                (short(&asn1::dotted(&attribute.kind)), value)
             })
             .collect();
         attributes.sort();
 
-        Self { attributes }
+        Ok(Self { attributes })
     }
 }
 
@@ -120,13 +120,6 @@ impl fmt::Display for Name {
 
         Ok(())
     }
-}
-
-/// The certificate `der` is, read.
-fn certified(der: &[u8]) -> Result<X509Certificate<'_>> {
-    X509Certificate::from_der(der)
-        .map(|(_, parsed)| parsed)
-        .map_err(|failure| TlsError::new(format!("not X.509: {failure}")))
 }
 
 fn push(attributes: &mut Vec<(String, String)>, part: &str) {

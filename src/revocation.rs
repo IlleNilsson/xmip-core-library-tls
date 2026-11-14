@@ -18,7 +18,6 @@ use std::time::SystemTime;
 
 use rustls::client::danger::HandshakeSignatureValid;
 use rustls::crypto::CryptoProvider;
-use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, CertificateRevocationListDer, UnixTime};
 use rustls::server::WebPkiClientVerifier;
 use rustls::server::danger::{ClientCertVerified, ClientCertVerifier};
@@ -165,9 +164,13 @@ fn lists(bytes: &[u8], what: &str) -> Result<Vec<CertificateRevocationListDer<'s
         }
         return Ok(vec![CertificateRevocationListDer::from(bytes.to_vec())]);
     }
-    let found = CertificateRevocationListDer::pem_slice_iter(bytes)
-        .collect::<core::result::Result<Vec<_>, _>>()
-        .map_err(|failure| TlsError::new(format!("reading {what}: {failure}")))?;
+    let text = core::str::from_utf8(bytes)
+        .map_err(|_| TlsError::new(format!("reading {what}: its PEM is not text")))?;
+    let found: Vec<CertificateRevocationListDer<'static>> = codec::pem::decode("X509 CRL", text)
+        .map_err(|failure| TlsError::new(format!("reading {what}: {failure}")))?
+        .into_iter()
+        .map(CertificateRevocationListDer::from)
+        .collect();
     if found.is_empty() {
         return Err(TlsError::new(format!("{what} held no X509 CRL block")));
     }

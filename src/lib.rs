@@ -46,7 +46,20 @@
 //! sends and keeps no session, and every handshake is a full one that
 //! verifies the peer's certificate as it stands (ADR-0033, amendment
 //! 2026-11-10). One login's data connections alone resume its control
-//! connection's session ([`login_trusting`]), as FTPS servers may insist.
+//! connection's session ([`ClientSettings::login`]), as FTPS servers may
+//! insist.
+//!
+//! **What a client checks a server by.** [`ClientSettings`] is the pair
+//! every client with an optional trust store holds — the trust store the
+//! server's certificate is checked against and the name it is checked for
+//! — for a database's login, FTPS, DRDA, a directory, an authorization
+//! server and an ACME server alike (ADR-0033, amendment 2026-11-13).
+//!
+//! **The certificate reader.** [`certificate`] reads a certificate once,
+//! over the estate's X.690 reader: its names, validity, key, usages and
+//! extensions, for this library ([`Name`], [`peer`], [`possession`]), the
+//! identity gates, provisioning and the SAML gate alike. Its PEM is
+//! `codec::pem`'s (ADR-0033, amendment 2026-11-13).
 //!
 //! **Who the client is, before its content.** [`peer::answered`] finishes
 //! a server's handshake and reads the certificate its client presented —
@@ -78,7 +91,9 @@
 //! nothing here knows it.
 
 pub mod alpn;
+pub mod certificate;
 mod client;
+mod client_settings;
 mod configuration;
 pub mod duplex;
 #[cfg(any(test, feature = "test-support"))]
@@ -92,9 +107,8 @@ mod revocation;
 mod server;
 mod signer;
 
-pub use client::{
-    Guarded, client, client_offering, client_trusting, client_with, configure, login_trusting,
-};
+pub use client::{Guarded, client, client_offering, client_with, configure};
+pub use client_settings::ClientSettings;
 pub use mutual::{Identity, trusting};
 pub use name::Name;
 pub use peer::Peer;

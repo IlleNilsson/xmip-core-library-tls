@@ -1,18 +1,22 @@
 //! What proving a browser's possession of its key costs (ADR-0009,
 //! amendment 2026-11-02), held to the millisecond rule: a handshake bound
 //! and recorded, its transcript recovered, beside the same handshake
-//! served plainly; and the node's check of the transcript.
+//! served plainly in the same rounds; and the node's check of the
+//! transcript. Each the fastest of five (`xcore::latency::spread`); until
+//! 2026-11-15 the median, which a busy moment moves.
 
 use std::net::TcpStream;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use xcore::fastest::FIVE;
+use xcore::latency::spread;
 use xmip_core_library_tls::fixture::connected;
 use xmip_core_library_tls::possession::{binding, handshaken, proved, proving};
 
-use crate::{Issued, median};
+use crate::Issued;
 
-const ROUNDS: usize = 31;
+const ROUNDS: usize = 6 * FIVE;
 
 /// One browser's handshake against a server that `serve` answers, and how
 /// long the server took from the connection to its finished handshake.
@@ -58,13 +62,13 @@ fn proving_a_browsers_key_adds_under_a_millisecond_to_its_handshake_and_its_chec
             *transcript.borrow_mut() = recorded.transcript().expect("a transcript");
         }));
     }
-    let (plainly, proving_median) = (median(served.clone()), median(proving_times));
-    let added = proving_median.saturating_sub(plainly);
-    eprintln!("a handshake served plainly {plainly:?}, proving {proving_median:?}");
+    let plainly = spread("a handshake served plainly", served).fastest_of_five;
+    let bound = spread("a handshake bound and recorded", proving_times).fastest_of_five;
+    let added = bound.saturating_sub(plainly);
     assert!(
         added < Duration::from_millis(1),
-        "binding and recording added {added:?} to a handshake of {:?}",
-        median(served)
+        "binding and recording added {added:?} to a handshake of {plainly:?}, the fastest of \
+         five each"
     );
 
     let transcript = transcript.into_inner();
@@ -76,10 +80,9 @@ fn proving_a_browsers_key_adds_under_a_millisecond_to_its_handshake_and_its_chec
             began.elapsed()
         })
         .collect();
-    let check = median(checks);
-    eprintln!("the node's check of a transcript {check:?}");
+    let check = spread("the node's check of a transcript", checks).fastest_of_five;
     assert!(
         check < Duration::from_millis(1),
-        "the node's check took {check:?}"
+        "the node's check took {check:?}, the fastest of five"
     );
 }

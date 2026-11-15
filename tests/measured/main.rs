@@ -17,9 +17,11 @@ mod possession;
 mod resumption;
 
 use std::io::{Read, Write};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use rcgen::{CertificateParams, CertifiedIssuer, ExtendedKeyUsagePurpose, IsCa, KeyPair};
+use xcore::fastest::FIVE;
+use xcore::latency::at_once;
 use xmip_core_library_tls::Identity;
 use xmip_core_library_tls::fixture::pair;
 
@@ -62,11 +64,6 @@ impl Issued {
     }
 }
 
-fn median(mut times: Vec<Duration>) -> Duration {
-    times.sort();
-    times[times.len() / 2]
-}
-
 #[test]
 fn a_write_is_not_held_up_by_a_read_waiting_on_the_same_connection() {
     let ((mut near_reading, mut near_writing), (mut far_reading, mut far_writing)) = pair();
@@ -78,17 +75,20 @@ fn a_write_is_not_held_up_by_a_read_waiting_on_the_same_connection() {
         heard
     });
     std::thread::sleep(Duration::from_millis(20));
-    // Meanwhile it writes, and is not held up by its own waiting read.
-    let started = Instant::now();
-    near_writing.write_all(b"wants").expect("written");
-    near_writing.flush().expect("flushed");
+    // Meanwhile it writes, and is not held up by its own waiting read: a
+    // write the read holds up is held up in every one of five, a write a
+    // busy machine preempted in some only (`xcore::latency::at_once`). It
+    // waits on no wake, so no plain wake is measured beside it.
+    let ((), fastest, _) = at_once("a write while a read waits", || {
+        near_writing.write_all(b"wants").expect("written");
+        near_writing.flush().expect("flushed");
+    });
     assert!(
-        started.elapsed() < Duration::from_millis(100),
-        "{:?}",
-        started.elapsed()
+        fastest < Duration::from_millis(100),
+        "{fastest:?}, the fastest of five"
     );
 
-    let mut asked = [0u8; 5];
+    let mut asked = [0u8; 5 * FIVE];
     far_reading.read_exact(&mut asked).expect("asked");
     far_writing.write_all(b"event").expect("answered");
     assert_eq!(&waiting.join().expect("near reader"), b"event");

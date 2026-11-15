@@ -10,10 +10,12 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use rustls::{ClientConfig, Connection, HandshakeKind, ServerConfig};
+use xcore::fastest::FIVE;
+use xcore::latency::spread;
 
-use crate::{Issued, median};
+use crate::Issued;
 
-const ROUNDS: usize = 201;
+const ROUNDS: usize = 40 * FIVE;
 
 /// `from`'s bytes to send, read and processed by `to`.
 fn moved(from: &mut Connection, to: &mut Connection) {
@@ -76,7 +78,7 @@ fn resuming(
 
 /// The full handshakes of `client` with `server`, and the resumed ones of
 /// the same two given rustls's defaults back, taken in turn so each sees
-/// the machine as the other does: each list fastest first.
+/// the machine as the other does: each list in the order measured.
 fn compared(client: &ClientConfig, server: &ServerConfig) -> [Vec<Duration>; 2] {
     let (full_client, full_server) = (Arc::new(client.clone()), Arc::new(server.clone()));
     let (resuming_server, resuming_client) = resuming(server, client);
@@ -90,13 +92,12 @@ fn compared(client: &ClientConfig, server: &ServerConfig) -> [Vec<Duration>; 2] 
         assert_eq!(kind, HandshakeKind::Resumed);
         resumed.push(took);
     }
-    full.sort();
-    resumed.sort();
     [full, resumed]
 }
 
-/// Held by the fastest of each, as the millisecond rule holds a cost
-/// beyond load; the medians are said beside it.
+/// Held by the fastest of five of each (`xcore::latency::spread`), as the
+/// millisecond rule holds a cost beyond load; until 2026-11-15 by the
+/// fastest of all.
 #[test]
 fn a_full_handshake_costs_under_a_millisecond_more_than_a_resumed_one() {
     let issued = Issued::new();
@@ -112,18 +113,13 @@ fn a_full_handshake_costs_under_a_millisecond_more_than_a_resumed_one() {
     );
 
     for (what, [full, resumed]) in [("mutual TLS", mutual), ("the server alone", alone)] {
-        let added = full[0].saturating_sub(resumed[0]);
-        eprintln!(
-            "{what}, the fastest of {ROUNDS}: in full {:?}, resumed {:?}, {added:?} more; \
-             the median: in full {:?}, resumed {:?}",
-            full[0],
-            resumed[0],
-            median(full.clone()),
-            median(resumed.clone()),
-        );
+        let full = spread(&format!("{what}, a handshake in full"), full).fastest_of_five;
+        let resumed = spread(&format!("{what}, one resumed"), resumed).fastest_of_five;
+        let added = full.saturating_sub(resumed);
         assert!(
             added < Duration::from_millis(1),
-            "{what}: a full handshake took {added:?} more than a resumed one"
+            "{what}: a full handshake took {added:?} more than a resumed one, the fastest of five \
+             each"
         );
     }
 }

@@ -69,7 +69,8 @@ before it, as TLS 1.3 signs them (a retried handshake's first ClientHello
 as its `message_hash`) or as TLS 1.2 does, answering the client's chain,
 the server's leaf and the random. Tests pin the draw order for TLS 1.3, 1.3
 retried and 1.2; the timing program holds binding and recording to under a
-millisecond added to a handshake, and the check to under one (about 0.15 ms
+millisecond added to a handshake served plainly beside it, and the check to
+under one, the fastest of five each (`xcore::latency::spread`; about 0.15 ms
 and 0.35 ms, debug build).
 
 **A server a browser reaches.** `Identity::server_asking` presents the
@@ -129,10 +130,13 @@ mutual-TLS handshake 1.66 to 2.24 ms at its fastest where a resumed one
 took 1.27 to 1.42 ms, 0.38 to 0.87 ms more (medians 2.37 to 3.68 ms
 against 1.86 to 2.91 ms); a server authenticated alone 1.37 to 1.63 ms
 where it took 1.24 to 1.49 ms, 0.07 to 0.29 ms more (medians 2.04 to 2.92
-against 1.82 to 2.60 ms). The program holds the added cost, at the
-fastest, under a millisecond; a run on a quiet machine is still owed, and
-the more loaded the machine, the closer the mutual-TLS cost came to the
-bound. A resumed TLS 1.3 handshake still agrees a fresh X25519MLKEM768
+against 1.82 to 2.60 ms). The program holds the added cost under a
+millisecond, the fastest of five of each over 200 rounds
+(`xcore::latency::spread`; until 2026-11-15 the fastest of all): on
+2026-11-15, under the day's load, mutual TLS
+1.21 ms in full against 0.95 ms resumed, 0.26 ms more, and a server
+authenticated alone 1.26 ms against 1.17 ms, 0.09 ms more. A run on a
+quiet machine is still owed. A resumed TLS 1.3 handshake still agrees a fresh X25519MLKEM768
 key, which is why resuming saved only the certificates' signatures and
 their checks, and it takes the same one round trip as a full one. A TLS
 1.2 peer pays a second round trip on top: a full TLS 1.2 handshake takes

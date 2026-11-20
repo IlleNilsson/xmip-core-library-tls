@@ -72,6 +72,8 @@ rcgen = "0.14"
 # once for the estate (`xcore::latency`). Test-only: what this library is
 # built out of stays Library (`test/Layer.Test.ps1` reads `[dependencies]`).
 xcore = { package = "xmip-core", git = "https://github.com/IlleNilsson/xmip-core", branch = "main", features = ["test-support"] }
+# A test's own temporary folder (`file::temporary`); for the tests only.
+file = { package = "xmip-core-library-file", git = "https://github.com/IlleNilsson/xmip-core-library-file", branch = "main", features = ["test-support"] }
 
 [lints.rust]
 # forbid, not deny: a module has no business writing unsafe. The one exception

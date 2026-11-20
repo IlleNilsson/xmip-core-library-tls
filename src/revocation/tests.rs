@@ -6,7 +6,6 @@
 
 use std::assert_matches;
 use std::io::{Read, Write};
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -15,6 +14,8 @@ use rcgen::{
     ExtendedKeyUsagePurpose, IsCa, KeyIdMethod, KeyPair, KeyUsagePurpose, RevokedCertParams,
     SerialNumber, date_time_ymd,
 };
+
+use file::temporary::Folder;
 
 use super::Revocation;
 use crate::fixture::connected;
@@ -195,40 +196,20 @@ fn an_expired_list_refuses_every_client_unless_configuration_accepts_it() {
     answer(&ours, 8, &server(&ours, accepting)).expect("accepted, as configured");
 }
 
-/// A file of its own under the system's temporary folder, removed when
-/// dropped.
-struct Scratch(PathBuf);
-
-impl Scratch {
-    fn new(name: &str) -> Self {
-        let folder =
-            std::env::temp_dir().join(format!("xmip-tls-revocation-{}-{name}", std::process::id()));
-        std::fs::create_dir_all(&folder).expect("a folder");
-        Self(folder.join("authority.crl"))
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        if let Some(folder) = self.0.parent() {
-            let _ = std::fs::remove_dir_all(folder);
-        }
-    }
-}
-
 #[test]
 fn a_list_written_anew_is_read_at_the_next_handshake_and_one_gone_refuses() {
+    let folder = Folder::new("tls-revocation-anew");
+    let crl = folder.join("authority.crl");
     let ours = authority();
-    let scratch = Scratch::new("anew");
-    std::fs::write(&scratch.0, list(&ours, &[], 2000, 2100)).expect("written");
-    let server = server(&ours, Revocation::from_file(&scratch.0).expect("lists"));
+    std::fs::write(&crl, list(&ours, &[], 2000, 2100)).expect("written");
+    let server = server(&ours, Revocation::from_file(&crl).expect("lists"));
     answer(&ours, 9, &server).expect("not revoked yet");
 
-    std::fs::write(&scratch.0, list(&ours, &[9], 2000, 2100)).expect("written anew");
+    std::fs::write(&crl, list(&ours, &[9], 2000, 2100)).expect("written anew");
     let refused = answer(&ours, 9, &server).expect_err("revoked since");
     assert_matches!(refused, Unanswered::Refused(_), "{refused:?}");
 
-    std::fs::remove_file(&scratch.0).expect("removed");
+    std::fs::remove_file(&crl).expect("removed");
     answer(&ours, 10, &server).expect_err("no list, no one");
 }
 
@@ -240,6 +221,6 @@ fn bytes_that_hold_no_list_are_refused_by_reason() {
         Revocation::from_lists(b"-----BEGIN CERTIFICATE-----\n-----END CERTIFICATE-----\n")
             .expect_err("no list block");
     assert!(refused.message.contains("no X509 CRL"), "{refused}");
-    let gone = std::env::temp_dir().join("xmip-tls-revocation-never-written.crl");
-    assert!(Revocation::from_file(gone).is_err());
+    let folder = Folder::new("tls-revocation-gone");
+    assert!(Revocation::from_file(folder.join("never-written.crl")).is_err());
 }
